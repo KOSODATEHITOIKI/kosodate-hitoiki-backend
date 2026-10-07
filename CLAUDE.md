@@ -6,7 +6,7 @@
 
 kosodate-hitoiki（子育てのぐち・相談・コツや体験談を共有するSNS、Flutter製）のバックエンド。Supabase（DB・RLS・Edge Functions）を管理する。フロントエンドは別リポジトリ [kosodate-hitoiki](https://github.com/naka328/kosodate-hitoiki)。
 
-現状は設計フェーズを終え、DBスキーマ・RLS・DBテストまで実装済み（Issue #10時点）。Edge Functions本体は未実装。
+現状はDBスキーマ・RLS・DBテスト（Issue #10）、送信前チェックの共通モジュール（#11）、プロフィール系のEdge Functions（#12）まで実装済み。投稿・コメント・共感などの業務APIは未実装（#13以降）。進捗の正は親Issue #6のチェックリスト。
 
 ## 一次情報と資料の優先順位
 
