@@ -76,6 +76,7 @@ npm run supabase:stop        # 停止
 npm run functions:check      # Edge Functionsのfmt・lint・型検査（Deno、supabase/functions/）
 npm run functions:test       # Edge FunctionsのDenoテスト
 npm run test:functions-integration  # Functionsの配線の結合テスト（要 supabase start）
+npm run test:functions-smoke        # Edge Runtime上で全Functionが読み込めるかの確認（要 supabase start）
 ```
 
 マイグレーションを追加・変更したら、必ず`npx supabase db reset`と`npx supabase test db`をローカルで実行してから push する。CIの`Database (migrations and RLS)`ジョブでも同じ検証が走る。

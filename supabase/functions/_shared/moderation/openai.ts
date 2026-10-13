@@ -1,4 +1,4 @@
-import { encodeBase64 } from "@std/encoding/base64";
+import { encodeBase64 } from "jsr:@std/encoding@1/base64";
 import { type ModerationScores, ModerationUnavailableError } from "./types.ts";
 
 const ENDPOINT = "https://api.openai.com/v1/moderations";

@@ -14,7 +14,8 @@
     "functions:test": "cd supabase/functions && deno test --frozen",
     "functions:eval": "cd supabase/functions && deno run --allow-env=OPENAI_API_KEY --allow-net=api.openai.com _shared/moderation/eval.ts",
     "test:concurrency": "bash supabase/tests/concurrency/run.sh",
-    "test:functions-integration": "bash supabase/tests/functions/run.sh"
+    "test:functions-integration": "bash supabase/tests/functions/run.sh",
+    "test:functions-smoke": "bash supabase/tests/functions/smoke.sh"
   },
   "engines": {
     "node": ">=22"

@@ -61,6 +61,8 @@ jobs:
         run: npm rebuild deno
       - name: Run Edge Functions integration tests
         run: npm run test:functions-integration
+      - name: Run Edge Functions runtime smoke test
+        run: npm run test:functions-smoke
       - name: Stop local Supabase
         if: always()
         run: npm run supabase:stop

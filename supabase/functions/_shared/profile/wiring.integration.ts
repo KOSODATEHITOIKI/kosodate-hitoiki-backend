@@ -7,7 +7,7 @@
  * 通常の `deno test`（*_test.ts）には含めない。環境変数は supabase/tests/functions/run.sh が設定する。
  */
 import { assert, assertEquals } from "@std/assert";
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 import {
   avatarHandler,
   changeNicknameHandler,
