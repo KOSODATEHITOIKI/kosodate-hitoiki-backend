@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 import { callModeration, callModerationImage } from "../moderation/openai.ts";
 import { DbError, type ProfileDeps, toDbError } from "./types.ts";
 
