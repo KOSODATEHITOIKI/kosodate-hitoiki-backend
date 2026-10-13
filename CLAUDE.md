@@ -63,6 +63,8 @@ main                  ← リリース済みの状態のみ
 - 新しいテーブルを追加したら**必ず**`alter table ... enable row level security;`を書く。有効化を忘れると、Supabaseの自動生成APIで全件公開されてしまう。
 - 公開用ビュー（`public_profiles`のように本文以外だけを公開する用途）は`security_invoker`を付けない（オーナー権限で実行、RLSをバイパスして公開列だけを見せる）。逆に、既存のRLSに従わせたいビュー（`public_posts`）は`security_invoker = true`を付ける。用途を混同しない。
 
+- **APIの公開権限は deny-by-default**。`anon`・`authenticated`へのテーブル・ビュー・関数の権限は、移行で明示したものだけ。新しいオブジェクトを追加したら、必要な権限を同じ移行で付け、`supabase/tests/api_privileges_test.sql`の期待値も更新する。関数のEXECUTEは既定で全員に付くため、不要なものは必ずrevokeする。
+
 ## ローカル開発・テスト
 
 ```sh
