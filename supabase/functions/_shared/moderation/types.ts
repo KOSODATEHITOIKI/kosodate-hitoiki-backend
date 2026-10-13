@@ -10,7 +10,8 @@ export type Reason =
   | "pii_address"
   | "harassment"
   | "hate"
-  | "threat";
+  | "threat"
+  | "image_inappropriate";
 
 export interface CheckResult {
   decision: Decision;

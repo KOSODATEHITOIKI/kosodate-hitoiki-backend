@@ -3,7 +3,7 @@
 -- supabase/tests/concurrency/run.sh で検証する。
 
 BEGIN;
-SELECT plan(9);
+SELECT plan(16);
 
 INSERT INTO auth.users (id) VALUES
   ('00000000-0000-0000-0000-0000000000a1'),
@@ -75,6 +75,61 @@ SELECT throws_ok(
   '42501',
   null,
   '利用規約の同意記録はクライアントから直接書き込めない'
+);
+
+RESET role;
+
+-- --- プロフィール登録（create_profile） ---
+INSERT INTO auth.users (id) VALUES
+  ('00000000-0000-0000-0000-0000000000b1'),
+  ('00000000-0000-0000-0000-0000000000b2');
+
+SELECT is(
+  public.create_profile('00000000-0000-0000-0000-0000000000b1', 'あおい', '自己紹介', '0〜1歳', null, '2026-10'),
+  'created',
+  '新規登録は created を返す'
+);
+
+SELECT is(
+  (SELECT count(*)::int FROM public.terms_acceptances WHERE user_id = '00000000-0000-0000-0000-0000000000b1')
+  + (SELECT count(*)::int FROM public.notification_settings WHERE user_id = '00000000-0000-0000-0000-0000000000b1'),
+  2,
+  '登録と同時に利用規約同意と通知設定が作られる'
+);
+
+SELECT is(
+  public.create_profile('00000000-0000-0000-0000-0000000000b1', 'あおい', '自己紹介', '0〜1歳', null, '2026-10'),
+  'exists',
+  '応答が届かず再送された同じ登録は、重複せず exists を返す'
+);
+
+SELECT is(
+  public.create_profile('00000000-0000-0000-0000-0000000000b1', 'べつの名前', null, null, null, '2026-10'),
+  'conflict',
+  '作成済みの利用者が別の名前で登録しようとすると conflict を返す'
+);
+
+SELECT throws_ok(
+  $$select public.create_profile('00000000-0000-0000-0000-0000000000b2', 'あおい', null, null, null, '2026-10')$$,
+  '23505',
+  null,
+  '他の人が使っている名前での登録は一意制約で拒否される'
+);
+
+SELECT is(
+  (SELECT count(*)::int FROM public.terms_acceptances WHERE user_id = '00000000-0000-0000-0000-0000000000b2'),
+  0,
+  '登録が失敗したときは利用規約同意も残らない（中途半端な登録を作らない）'
+);
+
+SET LOCAL role = 'authenticated';
+SET LOCAL request.jwt.claim.sub = '00000000-0000-0000-0000-0000000000b2';
+
+SELECT throws_ok(
+  $$select public.create_profile('00000000-0000-0000-0000-0000000000b2', 'ゆうと', null, null, null, '2026-10')$$,
+  '42501',
+  null,
+  'クライアントは create_profile を直接実行できない'
 );
 
 RESET role;

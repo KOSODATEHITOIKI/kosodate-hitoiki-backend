@@ -52,3 +52,20 @@ export function evaluateScores(scores: ModerationScores): {
     ),
   };
 }
+
+/**
+ * アップロード画像（アカウント画像）のreject閾値（設計案・未調整）。
+ * 画像は確認表示を挟まず、不適切と判定されたら保存しない。顔・子どもの判別は行わない。
+ */
+export const IMAGE_REJECT_THRESHOLDS: Readonly<Record<string, number>> = {
+  "sexual": 0.5,
+  "sexual/minors": 0.1,
+  "violence/graphic": 0.6,
+  "self-harm/instructions": 0.5,
+};
+
+export function isImageRejected(scores: ModerationScores): boolean {
+  return Object.entries(IMAGE_REJECT_THRESHOLDS).some(
+    ([category, score]) => (scores[category] ?? 0) >= score,
+  );
+}

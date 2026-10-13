@@ -6,7 +6,7 @@
 
 kosodate-hitoiki（子育てのぐち・相談・コツや体験談を共有するSNS、Flutter製）のバックエンド。Supabase（DB・RLS・Edge Functions）を管理する。フロントエンドは別リポジトリ [kosodate-hitoiki](https://github.com/naka328/kosodate-hitoiki)。
 
-現状は設計フェーズを終え、DBスキーマ・RLS・DBテストまで実装済み（Issue #10時点）。Edge Functions本体は未実装。
+現状はDBスキーマ・RLS・DBテスト（Issue #10）、送信前チェックの共通モジュール（#11）、プロフィール系のEdge Functions（#12）まで実装済み。投稿・コメント・共感などの業務APIは未実装（#13以降）。進捗の正は親Issue #6のチェックリスト。
 
 ## 一次情報と資料の優先順位
 
@@ -21,6 +21,7 @@ kosodate-hitoiki（子育てのぐち・相談・コツや体験談を共有す�
 | [バックエンド設計](docs/バックエンド設計.md) | 担当範囲、権限、処理の境界 |
 | [データ設計案](docs/データ設計案.md) | 経緯・論点の記録（テーブル定義そのものではない） |
 | [スキーマ定義](docs/スキーマ定義.md) | 確定したテーブル定義・ER概要（実装の一次資料） |
+| [認証設定](docs/認証設定.md) | 認証（メール・Google・Apple）の担当境界・外部設定・検証手順 |
 | [送信前チェック評価](docs/送信前チェック評価.md) | 送信前チェックの判定方式・閾値の初期案、日本語の評価例と結果 |
 | [権限表](docs/権限表.md) | 未ログイン／本人／他人／運営者の権限マトリクス |
 | [API契約](docs/API契約.md) | リクエスト／レスポンス例、エラー、ページング |
@@ -74,6 +75,7 @@ npm run test:concurrency     # 同時実行の競合テスト（要 supabase sta
 npm run supabase:stop        # 停止
 npm run functions:check      # Edge Functionsのfmt・lint・型検査（Deno、supabase/functions/）
 npm run functions:test       # Edge FunctionsのDenoテスト
+npm run test:functions-integration  # Functionsの配線の結合テスト（要 supabase start）
 ```
 
 マイグレーションを追加・変更したら、必ず`npx supabase db reset`と`npx supabase test db`をローカルで実行してから push する。CIの`Database (migrations and RLS)`ジョブでも同じ検証が走る。

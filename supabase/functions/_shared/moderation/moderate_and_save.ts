@@ -1,4 +1,4 @@
-import { checkText } from "./check.ts";
+import { checkLocal, checkText } from "./check.ts";
 import type { CheckDeps, CheckResult } from "./types.ts";
 
 export type Fields = Readonly<Record<string, string>>;
@@ -27,6 +27,18 @@ export async function moderateAndSave<T>(
   save: (verified: Fields) => Promise<T>,
 ): Promise<ModerateAndSaveResult<T>> {
   const verified: Fields = Object.freeze({ ...fields });
+
+  // 先にローカル判定（禁止語・個人情報）を全フィールドで行い、該当があれば外部APIを呼ばずに reject する。
+  const localRejects = Object.values(verified).map(checkLocal).filter((r) => r !== null);
+  if (localRejects.length > 0) {
+    return {
+      result: {
+        decision: "reject",
+        reasons: [...new Set(localRejects.flatMap((r) => r.reasons))],
+        supportNotice: false,
+      },
+    };
+  }
 
   const results: CheckResult[] = [];
   for (const text of Object.values(verified)) {

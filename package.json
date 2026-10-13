@@ -10,10 +10,11 @@
     "supabase:stop": "supabase stop",
     "supabase:status": "supabase status",
     "supabase:reset": "supabase db reset",
-    "functions:check": "cd supabase/functions && deno fmt --check && deno lint && deno check _shared",
+    "functions:check": "cd supabase/functions && deno fmt --check && deno lint && deno check \"**/*.ts\"",
     "functions:test": "cd supabase/functions && deno test --frozen",
     "functions:eval": "cd supabase/functions && deno run --allow-env=OPENAI_API_KEY --allow-net=api.openai.com _shared/moderation/eval.ts",
-    "test:concurrency": "bash supabase/tests/concurrency/run.sh"
+    "test:concurrency": "bash supabase/tests/concurrency/run.sh",
+    "test:functions-integration": "bash supabase/tests/functions/run.sh"
   },
   "engines": {
     "node": ">=22"

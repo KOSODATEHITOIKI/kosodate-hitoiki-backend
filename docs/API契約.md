@@ -41,6 +41,7 @@ Edge Functionsのベースパスは`/functions/v1/`（ローカルは`http://127
 | MODERATION_REJECTED | 422 | 送信前チェックで送信不可と判定 |
 | MODERATION_CONFIRM_REQUIRED | 409 | 送信前チェックで確認表示が必要（[バックエンド設計](バックエンド設計.md)4節） |
 | MODERATION_UNAVAILABLE | 503 | 外部Moderation APIが利用不可（保存はブロックし再試行を促す。決定済み） |
+| INTERNAL_ERROR | 500 | 想定外のエラー（内部の詳細・本文は返さない） |
 | RATE_LIMITED | 429 | 登録直後のレート制限、新規登録停止中 |
 | CONFLICT | 409 | 同時更新・受付状態の競合 |
 
@@ -79,15 +80,62 @@ GET /rest/v1/profiles?id=eq.<自分のuser_id>&select=*
 Authorization: Bearer <token>
 ```
 
+### プロフィール登録
+
+```http
+POST /functions/v1/profile-create
+Authorization: Bearer <token>
+{
+  "nickname": "はなこ",
+  "bio": "よろしくお願いします",
+  "child_age_range": "0〜1歳",
+  "icon_key": null,
+  "terms_version": "2026-10",
+  "confirmed": false
+}
+```
+
+- ニックネーム2〜12文字（絵文字等も1文字、全角・半角はNFKC後に数える）、自己紹介100文字まで。ニックネーム・自己紹介は送信前チェックを通す（`confirmed: true`で確認後の再送）。`terms_version`は必須（利用規約への同意を記録）。
+- 成功：新規作成は`201`、同じ内容の再送（作成済み）は`200`。レスポンス`{ "id": "<user_id>", "support_notice": false }`。`support_notice`は本人にだけ相談先を案内するためのフラグ。
+- 別のニックネームで作成済みなら`409 CONFLICT`。他の人が使用中の名前は`409 CONFLICT`、旧名の予約中は`422 VALIDATION_FAILED`。
+- プロフィール・利用規約同意・通知設定は1トランザクションで作られ、失敗時は何も残らない。
+
+### プロフィール更新
+
+```http
+PATCH /functions/v1/profile-update
+Authorization: Bearer <token>
+{ "bio": "更新しました", "child_age_range": "2〜3歳", "icon_key": "bear_01" }
+```
+
+指定した項目だけ更新する（空の更新は`422`）。自己紹介は送信前チェックを通す。`icon_key`（イラスト）を選ぶと、アップロード画像は外れてファイルも削除される（どちらか一方）。
+
+### アカウント画像
+
+```http
+PUT /functions/v1/profile-avatar
+Authorization: Bearer <token>
+Content-Type: image/png
+<画像のバイナリ>
+
+DELETE /functions/v1/profile-avatar
+Authorization: Bearer <token>
+```
+
+- 形式はJPEG・PNG・WebP、2MBまで（アプリ側で512px四方に縮小して送る）。Content-Typeとファイルの中身（先頭のバイト列）が一致しない場合は`422`。
+- 保存前にOpenAI Moderationの画像判定で確認し、不適切なら`422 MODERATION_REJECTED`、外部API障害なら`503 MODERATION_UNAVAILABLE`（保存しない）。
+- 成功：`200`、`{ "avatar_path": "<user_id>/<id>.png" }`。公開URLはStorageの`avatars`バケットの公開URL＋`avatar_path`。差し替え時は旧画像を削除する。`DELETE`はアップロード画像を外してファイルを削除する。
+- クライアントからStorageへ直接アップロードすることはできない。
+
 ### ニックネーム変更
 
 ```http
 POST /functions/v1/profile-nickname
 Authorization: Bearer <token>
-{ "nickname": "あたらしい名前" }
+{ "nickname": "あたらしい名前", "confirmed": false }
 ```
 
-成功時`200`、旧名を`nickname_reservations`へ30日予約。バリデーション・変更間隔違反は`VALIDATION_FAILED`。
+成功時`200`、旧名を`nickname_reservations`へ30日予約。初回の変更は制限なし、以降は前回の変更から30日空ける（違反は`422 VALIDATION_FAILED`）。旧名は他の人が30日使用できない（本人は再利用可）。送信前チェックあり。
 
 ## 3. 投稿
 

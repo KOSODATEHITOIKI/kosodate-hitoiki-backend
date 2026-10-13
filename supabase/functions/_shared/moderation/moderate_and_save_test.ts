@@ -141,3 +141,21 @@ Deno.test("HTTPレスポンス：API契約のコードとステータスに対�
   assertEquals(responseForDecision({ decision: "allow", reasons: [], supportNotice: false }), null);
   assertEquals(responseForError(new Error("other")), null);
 });
+
+Deno.test("複数フィールド：後ろのフィールドの個人情報は、外部API障害より先に reject される", async () => {
+  const calls: string[] = [];
+  const r = await moderateAndSave(
+    { nickname: "たろう", bio: "連絡は090-1234-5678まで" },
+    {
+      moderate: (text) => {
+        calls.push(text);
+        return Promise.reject(new ModerationUnavailableError());
+      },
+    },
+    {},
+    () => Promise.resolve(null),
+  );
+  assertEquals(r.result.decision, "reject");
+  assertEquals(r.result.reasons, ["pii_phone"]);
+  assertEquals(calls, []); // どのフィールドも外部APIへ送らない
+});

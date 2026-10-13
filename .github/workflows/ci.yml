@@ -56,6 +56,11 @@ jobs:
         run: npx supabase test db
       - name: Run concurrency tests
         run: npm run test:concurrency
+      # Denoの実行ファイルはnpmのpostinstallで取得する（上のnpm ciは--ignore-scripts）。
+      - name: Install Deno binary
+        run: npm rebuild deno
+      - name: Run Edge Functions integration tests
+        run: npm run test:functions-integration
       - name: Stop local Supabase
         if: always()
         run: npm run supabase:stop

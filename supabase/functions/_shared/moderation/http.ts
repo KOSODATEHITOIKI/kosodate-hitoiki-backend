@@ -1,17 +1,5 @@
+import { errorResponse } from "../http.ts";
 import { type CheckResult, ModerationUnavailableError } from "./types.ts";
-
-/** docs/API契約.md のエラー形式・コードへ対応づける。本文・APIキーはレスポンスに含めない。 */
-function errorResponse(
-  status: number,
-  code: string,
-  message: string,
-  details?: Record<string, unknown>,
-): Response {
-  return new Response(JSON.stringify({ error: { code, message, details } }), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
 
 /** 判定が allow 以外のとき、対応するエラーレスポンスを返す。allow なら null。 */
 export function responseForDecision(result: CheckResult): Response | null {
