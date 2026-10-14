@@ -13,4 +13,4 @@ export SUPABASE_ANON_KEY="$ANON_KEY"
 export SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY"
 
 cd supabase/functions
-npx deno test --frozen --allow-env --allow-net _shared/profile/wiring.integration.ts
+npx deno test --frozen --allow-env --allow-net _shared/profile/wiring.integration.ts _shared/posts/wiring.integration.ts

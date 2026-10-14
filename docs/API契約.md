@@ -65,13 +65,14 @@ GET /rest/v1/posts?select=*&order=created_at.desc,id.desc&limit=20&or=(created_a
 
 ## 2. 認証・プロフィール
 
-### プロフィール取得（公開ニックネームのみ）
+### プロフィール取得（ログイン済み・ニックネームのみ）
 
 ```http
 GET /rest/v1/public_profiles?id=eq.<user_id>&select=id,nickname,icon_key,avatar_path
+Authorization: Bearer <token>
 ```
 
-`public_profiles`はbio・child_age_rangeを含まない公開ビュー（[スキーマ定義](スキーマ定義.md)2節、RLSでプロフィール本文を保護）。
+`public_profiles`はbio・child_age_rangeを含まない公開ビュー（[スキーマ定義](スキーマ定義.md)2節）。**未ログインは参照できない**（利用者IDを含むため）。対象は、自分自身と、公開中の投稿・コメントの投稿者に限る。未ログインが投稿者のニックネームを知るには、`public_posts`の`author_nickname`を使う。
 
 ### プロフィール取得（本人）
 
@@ -142,10 +143,10 @@ Authorization: Bearer <token>
 ### 一覧取得（未ログイン可）
 
 ```http
-GET /rest/v1/public_posts?select=id,post_type,topic_id,body,created_at,comment_count&order=created_at.desc,id.desc&limit=20
+GET /rest/v1/public_posts?select=id,post_type,topic_id,body,created_at,edited_at,comment_count,author_nickname,author_icon_key,author_avatar_path&order=created_at.desc,id.desc&limit=20
 ```
 
-`public_posts`は一時非表示・削除済みを除外し、共感件数・通報情報を含まない公開ビュー（[権限表](権限表.md)2節）。
+`public_posts`は一時非表示・削除済みを除外し、共感件数・通報情報・**投稿者の利用者ID（`author_id`）を含まない**公開ビュー（[権限表](権限表.md)2節）。投稿者の表示は`author_nickname`・`author_icon_key`・`author_avatar_path`。`edited_at`が非nullなら「編集済み」と表示する。`posts`テーブルは未ログインでは`author_id`を読めない（`select=*`も不可）。
 
 ### 投稿作成
 
@@ -164,12 +165,30 @@ Idempotency-Key: <uuid>
 レスポンス`201`：
 
 ```json
-{ "id": "b3c1...", "created_at": "2026-09-29T03:00:00Z" }
+{ "id": "b3c1...", "created_at": "2026-09-29T03:00:00Z", "support_notice": false }
 ```
 
 送信前チェックで`MODERATION_CONFIRM_REQUIRED`が返る場合、クライアントは確認表示後に`{"...": "...", "confirmed": true}`を付けて再送する。`MODERATION_REJECTED`は`confirmed`を付けても覆らない。エラーの`details.reasons`には理由コード（`banned_word`・`pii_phone`・`harassment`等）だけを入れ、本文は含めない。
 
 **設計案**：自分や子どもへの危害をほのめかす内容は投稿を止めず、書き込んだ本人へのレスポンスにだけ`"support_notice": true`を含め、クライアントが相談先を案内する。他の利用者へは公開しない（詳細は[送信前チェック評価](送信前チェック評価.md)）。
+
+- 本文は前後の空白を除いて1文字以上、1,000文字まで（絵文字等は1文字）。`post_type`は`guchi`・`soudan`・`kotsu`、`reaction_mode`は省略すると`quiet_support`。`Idempotency-Key`は任意（同じキーの再送は最初の結果を返し、投稿を重複させない。利用者ごと・24時間）。
+- 利用停止中・プロフィール未登録は`403 FORBIDDEN`（`details.reason`は`restricted`・`profile_required`）。
+
+### 投稿の編集・削除（本人のみ）
+
+```http
+PATCH /functions/v1/posts/{id}
+Authorization: Bearer <token>
+{ "body": "書き直した内容", "confirmed": false }
+
+DELETE /functions/v1/posts/{id}
+Authorization: Bearer <token>
+```
+
+- 編集できるのは**本文のみ**（種類・話題・反応モードは変更できない）。編集後の本文も送信前チェックを通す。本文が実際に変わったときだけ`edited_at`が設定される（レスポンス`{ "id", "edited_at", "support_notice" }`）。利用停止中は編集できない（`403`）。
+- 他人は`403 FORBIDDEN`、存在しなければ`404 NOT_FOUND`。
+- 削除すると、コメント・返信・共感・保存・通知も一緒に消える（コメントした人への通知はしない）。成功は`200 { "deleted": true }`。
 
 ### 反応モード・受付状態の変更
 
@@ -179,18 +198,18 @@ Authorization: Bearer <token>
 { "reaction_mode": "want_comments", "comment_acceptance": "open" }
 ```
 
-本人以外は`FORBIDDEN`。
+本人以外は`403 FORBIDDEN`。`reaction_mode`は`quiet_support`⇄`want_comments`の相互変更が可能。`comment_acceptance`は`want_comments`のときだけ`open`⇄`closed`を指定でき（省略すると現在の状態を保つ。`want_comments`への変更直後は`open`）、`quiet_support`に指定すると`422`。コメント保存とは投稿行のロックで直列化され、受付終了が確定した後に新規コメントが保存されることはない。
 
 ## 4. コメント・返信
 
 ### 一覧取得（ログイン必須）
 
 ```http
-GET /rest/v1/comments?post_id=eq.<post_id>&select=id,author_id,parent_comment_id,body,deleted_at,updated_at&order=created_at.asc
+GET /rest/v1/member_comments?post_id=eq.<post_id>&select=id,author_id,parent_comment_id,body,is_deleted,created_at,edited_at,author_nickname,author_icon_key,author_avatar_path&order=created_at.asc
 Authorization: Bearer <token>
 ```
 
-`deleted_at`が非nullの行は`body`がnullで返る。クライアントは「削除済み」表示に置き換える。一時非表示（`hidden_at`）の行はRLSで除外される（運営者を除く）。
+`is_deleted`がtrueの行は`body`がnullで返る。クライアントは「削除済み」表示に置き換える。返信は`parent_comment_id`で親の下に表示する。一時非表示のコメント、および親投稿が一時非表示のコメントはRLSで除外される（運営者を除く）。`edited_at`が非nullなら「編集済み」。
 
 ### コメント・返信の作成
 
@@ -201,7 +220,10 @@ Idempotency-Key: <uuid>
 { "post_id": "b3c1...", "parent_comment_id": null, "body": "わかります、私も同じです" }
 ```
 
-受付状態が`closed`、投稿者にブロックされている、利用停止中のいずれかであれば`FORBIDDEN`。`parent_comment_id`が返信への返信の場合は`VALIDATION_FAILED`。
+- 本文は前後の空白を除いて1文字以上、500文字まで（絵文字等は1文字）。`Idempotency-Key`は任意。
+- 受付状態が`closed`・`quiet_support`の投稿、ブロックされている（投稿者、または返信先コメントの投稿者に）、利用停止中のいずれかであれば`403 FORBIDDEN`。`details.reason`は`comments_closed`・`blocked`・`restricted`。一時非表示の投稿・存在しない投稿は`404 NOT_FOUND`。
+- 親コメントが返信（返信への返信）、別の投稿のコメント、存在しない、削除済み、一時非表示の場合は`422 VALIDATION_FAILED`。
+- 成功は`201 { "id", "created_at", "support_notice" }`。投稿者（返信なら返信先コメントの投稿者）へ通知が作られる（自分自身へは通知しない）。
 
 ### コメント編集・削除
 
@@ -214,7 +236,7 @@ DELETE /functions/v1/comments/{id}
 Authorization: Bearer <token>
 ```
 
-削除は`deleted_at`を設定するソフト削除（[スキーマ定義](スキーマ定義.md)3節）。
+編集は本人のみ・**受付終了後も可**で、送信前チェックを通す。本文が変わったときだけ`edited_at`が設定される。利用停止中は編集できない。削除は`deleted_at`を設定するソフト削除（[スキーマ定義](スキーマ定義.md)3節）で、本文は消えて返信は残る。他人は`403`、削除済みは`404`。成功は`200`。
 
 ## 5. リアクション
 
