@@ -175,3 +175,79 @@ Deno.test("結合：ミュートは一覧に効き、詳細には効かない。
     await admin.auth.admin.deleteUser(b.userId);
   }
 });
+
+Deno.test("結合：共感はAPI経由のみ（直接の書き込みは拒否）。件数は投稿者だけ。保存は本人だけ", async () => {
+  const owner = await signUp("rx-owner", "とうこうしゃ");
+  const fan = await signUp("rx-fan", "きょうかん");
+  const anon = createClient(url, anonKey, { auth: { persistSession: false } });
+  try {
+    await admin.from("reaction_types").insert([{ label: "大変だったね" }, { label: "わかるよ" }]);
+    const types = (await admin.from("reaction_types").select("id").order("id")).data!;
+    const [t1, t2] = [types[types.length - 2].id as number, types[types.length - 1].id as number];
+
+    const created = await postsHandler(deps)(
+      req("POST", "/posts", owner.token, { post_type: "guchi", body: "つらい一日でした" }),
+    );
+    const postId = (await created.json()).id as string;
+
+    // 共感：登録→選び直し。1投稿1人1つ
+    const put = await postsHandler(deps)(
+      req("PUT", `/posts/${postId}/reaction`, fan.token, { reaction_type_id: t1 }),
+    );
+    assertEquals(put.status, 200);
+    const again = await postsHandler(deps)(
+      req("PUT", `/posts/${postId}/reaction`, fan.token, { reaction_type_id: t2 }),
+    );
+    assertEquals((await again.json()).reaction_type_id, t2);
+    assertEquals((await admin.from("reactions").select("*").eq("post_id", postId)).data?.length, 1);
+
+    // 直接の書き込み（クライアントのREST）は拒否される
+    const direct = await fan.client.from("reactions").insert({
+      post_id: postId,
+      user_id: fan.userId,
+      reaction_type_id: t1,
+    });
+    assert(direct.error !== null, "共感を直接書き込めてしまった");
+    assert((await fan.client.from("reactions").delete().eq("post_id", postId)).error !== null);
+
+    // 自分の共感は参照でき、件数は投稿者だけが取得できる。行そのものは投稿者にも見えない
+    assertEquals((await fan.client.from("reactions").select("reaction_type_id")).data?.length, 1);
+    assertEquals((await fan.client.rpc("get_post_reaction_count", { p_post_id: postId })).data, 0);
+    assertEquals(
+      (await owner.client.rpc("get_post_reaction_count", { p_post_id: postId })).data,
+      1,
+    );
+    assertEquals((await owner.client.from("reactions").select("*")).data?.length, 0);
+    assert((await anon.rpc("get_post_reaction_count", { p_post_id: postId })).error !== null);
+
+    // 取消（冪等）
+    const del = await postsHandler(deps)(req("DELETE", `/posts/${postId}/reaction`, fan.token));
+    assertEquals((await del.json()).deleted, true);
+    const del2 = await postsHandler(deps)(req("DELETE", `/posts/${postId}/reaction`, fan.token));
+    assertEquals((await del2.json()).deleted, false);
+
+    // 保存：本人だけ。存在しない投稿IDの保存は、見えない投稿と同じエラー
+    assertEquals(
+      (await fan.client.from("saved_posts").insert({ user_id: fan.userId, post_id: postId })).error,
+      null,
+    );
+    const missing = await fan.client.from("saved_posts").insert({
+      user_id: fan.userId,
+      post_id: crypto.randomUUID(),
+    });
+    assertEquals(missing.error?.code, "42501");
+    assertEquals(
+      (await fan.client.from("saved_post_list").select("id,saved_at")).data?.map((r) => r.id),
+      [postId],
+    );
+    assertEquals((await owner.client.from("saved_posts").select("*")).data?.length, 0);
+    assertEquals((await owner.client.from("saved_post_list").select("id")).data?.length, 0);
+    assert((await anon.from("saved_post_list").select("id")).error !== null);
+    // 保存・共感では、投稿者へ通知は作られない
+    assertEquals((await owner.client.from("notifications").select("id")).data?.length, 0);
+  } finally {
+    await admin.from("reaction_types").delete().neq("id", 0);
+    await admin.auth.admin.deleteUser(owner.userId);
+    await admin.auth.admin.deleteUser(fan.userId);
+  }
+});

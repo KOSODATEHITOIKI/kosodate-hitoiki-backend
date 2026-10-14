@@ -36,6 +36,12 @@ export interface PostsDb {
     body: string,
   ): Promise<{ id: string; edited_at: string | null }>;
   deleteComment(userId: string, commentId: string): Promise<void>;
+  setReaction(
+    userId: string,
+    postId: string,
+    reactionTypeId: number,
+  ): Promise<{ post_id: string; reaction_type_id: number; updated_at: string }>;
+  removeReaction(userId: string, postId: string): Promise<{ deleted: boolean }>;
 }
 
 export interface PostsDeps {

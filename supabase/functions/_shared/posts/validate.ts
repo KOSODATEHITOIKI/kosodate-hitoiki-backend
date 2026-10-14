@@ -83,3 +83,10 @@ export function validateIdempotencyKey(header: string | null): Validated<string 
     ? { ok: true, value: header }
     : fail("Idempotency-Key", "Idempotency-Keyの形式が正しくありません。");
 }
+
+/** 共感の定型文ID（運営が用意する定型文の識別子）。 */
+export function validateReactionTypeId(input: unknown): Validated<number> {
+  return typeof input === "number" && Number.isInteger(input) && input >= 1 && input <= 32767
+    ? { ok: true, value: input }
+    : fail("reaction_type_id", "定型文の指定が正しくありません。");
+}

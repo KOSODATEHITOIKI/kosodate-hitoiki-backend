@@ -3,7 +3,7 @@
 -- admin_usersのポリシーが再帰しないこと、一時非表示投稿のコメント・共感が制限されることを確認する。
 
 BEGIN;
-SELECT plan(12);
+SELECT plan(10);
 
 INSERT INTO auth.users (id) VALUES
   ('00000000-0000-0000-0000-00000000000a'), -- user_a（投稿者）
@@ -74,32 +74,13 @@ SELECT is(
   '一時非表示の投稿のコメントは一般利用者から隠れる'
 );
 
-SELECT lives_ok(
+-- 共感はDB関数（service_role専用）からのみ書き込む。直接の書き込みはできない（reactions_saved_test.sqlで詳細を検証）。
+SELECT throws_ok(
   $$insert into public.reactions (post_id, user_id, reaction_type_id)
     values ('00000000-0000-0000-0000-0000000000f1', '00000000-0000-0000-0000-00000000000b', 1)$$,
-  '公開投稿へは共感できる'
-);
-
-SELECT throws_ok(
-  $$insert into public.reactions (post_id, user_id, reaction_type_id)
-    values ('00000000-0000-0000-0000-0000000000f2', '00000000-0000-0000-0000-00000000000b', 1)$$,
   '42501',
   null,
-  '一時非表示の投稿へは共感できない'
-);
-
-RESET role;
-
--- === 利用停止中（authenticated、user_d） ===
-SET LOCAL role = 'authenticated';
-SET LOCAL request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000d';
-
-SELECT throws_ok(
-  $$insert into public.reactions (post_id, user_id, reaction_type_id)
-    values ('00000000-0000-0000-0000-0000000000f1', '00000000-0000-0000-0000-00000000000d', 1)$$,
-  '42501',
-  null,
-  '利用停止中は共感できない'
+  '共感を直接書き込めない（ブロック・利用停止・非表示の確認を迂回できない）'
 );
 
 RESET role;

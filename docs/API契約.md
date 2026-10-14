@@ -249,7 +249,11 @@ DELETE /functions/v1/posts/{id}/reaction
 Authorization: Bearer <token>
 ```
 
-`PUT`は登録・変更を1操作で扱う（`on conflict do update`）。件数は`reactions`テーブルへの直接SELECTでは取得できない（他者の行が見えてしまうため）。投稿者本人と運営者のみ以下のRPC（`security definer`関数）で取得する（運営者にも共感の行そのものは見せない）（[スキーマ定義](スキーマ定義.md)4節）：
+- `PUT`は登録・選び直しを1操作で扱う（`on conflict do update`。1投稿1人1つ、同時に操作しても1件に保たれる）。成功は`200 { "post_id", "reaction_type_id", "updated_at" }`。コメント受付が終了していても共感できる。
+- `DELETE`は取消。常に成功し（`200 { "deleted": true|false }`）、投稿の存在を知る手がかりにならない。
+- `PUT`のエラー：未ログイン`401`、定型文が存在しない・無効`422`、見えない投稿（一時非表示・削除済み・存在しない）`404`、ブロックされている・利用停止中・プロフィール未登録・**自分の投稿**は`403`（`details.reason`は`blocked`・`restricted`・`profile_required`・`not_owner`）。自分の投稿への共感は暫定で不可（未決事項）。
+- 共感は`reactions`テーブルへ**直接書き込めない**（ブロック・利用停止・非表示の確認を迂回できないため、DB関数に一本化した）。自分の共感は`GET /rest/v1/reactions?post_id=eq.<id>`で参照できる。
+- 件数は`reactions`テーブルへの直接SELECTでは取得できない（他者の行が見えてしまうため）。投稿者本人と運営者のみ以下のRPC（`security definer`関数）で取得する（運営者にも共感の行そのものは見せない）（[スキーマ定義](スキーマ定義.md)4節）：
 
 ```http
 POST /rest/v1/rpc/get_post_reaction_count
@@ -264,12 +268,15 @@ Authorization: Bearer <token>
 ```http
 POST   /rest/v1/saved_posts        { "post_id": "..." }
 DELETE /rest/v1/saved_posts?post_id=eq.<id>
+GET    /rest/v1/saved_post_list?select=*&order=saved_at.desc&limit=20
 POST   /rest/v1/hidden_items       { "target_type": "post", "target_id": "..." }
 POST   /rest/v1/blocks             { "blocked_id": "..." }
 DELETE /rest/v1/blocks?blocked_id=eq.<id>
 POST   /rest/v1/muted_topics       { "topic_id": 3 }
 POST   /rest/v1/muted_words        { "word": "..." }
 ```
+
+保存一覧（`saved_post_list`）は本人だけが取得でき、投稿の列に`saved_at`が付く。見えなくなった投稿（削除・一時非表示・ブロック・自分だけの非表示）は一覧に出ない（保存自体は残る）。**見えない投稿・存在しない投稿は保存できず、どちらも`42501`で、投稿の存在を知る手がかりにならない**。保存数・保存した事実は誰にも公開せず、通知もしない。共感・保存で投稿者へ通知は作られない（共感のまとめ通知は#19）。
 
 いずれもRLSで本人の行のみ操作可能（[権限表](権限表.md)5節）。PostgRESTの一意制約違反は`409`（PostgRESTの標準応答）として返る。重複操作を許したい場合は`Prefer: resolution=ignore-duplicates`を付ける。解除（`DELETE`）は、対象がなくてもエラーにならない（冪等）。自分自身のブロックは`400`（CHECK制約）。ブロックされた相手には通知せず、ブロックされている事実を参照する経路もない。
 
