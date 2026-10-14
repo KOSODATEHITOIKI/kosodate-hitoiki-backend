@@ -251,3 +251,92 @@ Deno.test("結合：共感はAPI経由のみ（直接の書き込みは拒否）
     await admin.auth.admin.deleteUser(fan.userId);
   }
 });
+
+Deno.test("結合：検索はREST（RPC）経由で、未ログインでも使え、ブロック・ミュートを適用し、利用者IDを出さない", async () => {
+  const owner = await signUp("srch-owner", "とうこうしゃ");
+  const viewer = await signUp("srch-viewer", "えつらん");
+  const anon = createClient(url, anonKey, { auth: { persistSession: false } });
+  try {
+    const post = async (body: string) => {
+      const r = await postsHandler(deps)(
+        req("POST", "/posts", owner.token, { post_type: "guchi", body }),
+      );
+      assertEquals(r.status, 201);
+      return (await r.json()).id as string;
+    };
+    const id1 = await post("夜泣きがつらい毎晩");
+    const id2 = await post("保育園の送迎で悩んでいます");
+    await post("ＮＥＴＡバレに注意");
+
+    // 未ログイン：検索できる。1文字・全角半角・複数語（AND）。利用者IDは出ない
+    const r1 = await anon.rpc("search_posts", { p_query: "夜泣き" });
+    assertEquals(r1.error, null);
+    assertEquals((r1.data as { id: string }[]).map((x) => x.id), [id1]);
+    assertEquals((r1.data as { author_id: string | null }[])[0].author_id, null);
+    assertEquals((r1.data as { author_nickname: string }[])[0].author_nickname, "とうこうしゃ");
+    assertEquals(((await anon.rpc("search_posts", { p_query: "夜" })).data as unknown[]).length, 1);
+    assertEquals(
+      ((await anon.rpc("search_posts", { p_query: "neta" })).data as unknown[]).length,
+      1,
+    );
+    assertEquals(
+      ((await anon.rpc("search_posts", { p_query: "送迎 保育園" })).data as unknown[]).length,
+      1,
+    );
+    assertEquals(
+      ((await anon.rpc("search_posts", { p_query: "ひみつ" })).data as unknown[]).length,
+      0,
+    );
+
+    // 入力の検証は 400（PostgRESTの標準形式）。件数は50件までに抑える
+    const bad = await anon.rpc("search_posts", { p_query: "夜泣き", p_post_type: "x" });
+    assert(bad.error !== null);
+    assertEquals(bad.error?.message, "VALIDATION_FAILED");
+    const many = await anon.rpc("search_posts", { p_limit: 100000 });
+    assert((many.data as unknown[]).length <= 50);
+
+    // ログイン済み：ミュートした言葉・ブロックが検索に反映される。利用者IDを返す
+    const before = await viewer.client.rpc("search_posts", { p_query: "夜泣き" });
+    assertEquals((before.data as unknown[]).length, 1);
+    assertEquals(
+      (before.data as { author_id: string }[])[0].author_id,
+      owner.userId,
+    );
+    await viewer.client.from("muted_words").insert({ user_id: viewer.userId, word: "夜泣き" });
+    assertEquals(
+      ((await viewer.client.rpc("search_posts", { p_query: "夜泣き" })).data as unknown[]).length,
+      0,
+    );
+    // ほかの利用者・未ログインには影響しない
+    assertEquals(
+      ((await anon.rpc("search_posts", { p_query: "夜泣き" })).data as unknown[]).length,
+      1,
+    );
+    await viewer.client.from("blocks").insert({
+      blocker_id: viewer.userId,
+      blocked_id: owner.userId,
+    });
+    assertEquals(
+      ((await viewer.client.rpc("search_posts", { p_query: "保育園" })).data as unknown[]).length,
+      0,
+    );
+
+    // 一時非表示（通報）の投稿は、未ログインにもログイン済みにも出ない
+    await admin.from("posts").update({ hidden_at: new Date().toISOString() }).eq("id", id2);
+    assertEquals(
+      ((await anon.rpc("search_posts", { p_query: "保育園" })).data as unknown[]).length,
+      0,
+    );
+    assertEquals(
+      ((await owner.client.rpc("search_posts", { p_query: "保育園" })).data as unknown[]).length,
+      0,
+    );
+
+    // 関数があっても、元のテーブルを直接読めるようにはなっていない
+    assert((await anon.from("muted_words").select("*")).error !== null);
+    assert((await anon.from("profiles").select("*")).error !== null);
+  } finally {
+    await admin.auth.admin.deleteUser(owner.userId);
+    await admin.auth.admin.deleteUser(viewer.userId);
+  }
+});
