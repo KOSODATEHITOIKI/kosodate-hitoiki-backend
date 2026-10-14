@@ -57,6 +57,14 @@ export function createPostsDeps(): PostsDeps {
     deleteComment: async (userId, commentId) => {
       await rpc("delete_comment", { p_user_id: userId, p_comment_id: commentId });
     },
+    setReaction: (userId, postId, reactionTypeId) =>
+      rpc("set_reaction", {
+        p_user_id: userId,
+        p_post_id: postId,
+        p_reaction_type_id: reactionTypeId,
+      }),
+    removeReaction: (userId, postId) =>
+      rpc("remove_reaction", { p_user_id: userId, p_post_id: postId }),
   };
 
   return {

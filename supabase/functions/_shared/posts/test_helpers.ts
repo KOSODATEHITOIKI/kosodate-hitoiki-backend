@@ -15,6 +15,8 @@ export interface Fake {
     createComment: Parameters<PostsDb["createComment"]>[0][];
     updateCommentBody: { commentId: string; body: string }[];
     deleteComment: string[];
+    setReaction: { postId: string; reactionTypeId: number }[];
+    removeReaction: string[];
     moderated: string[];
   };
 }
@@ -38,6 +40,8 @@ export function makeFake(options: {
       createComment: [],
       updateCommentBody: [],
       deleteComment: [],
+      setReaction: [],
+      removeReaction: [],
       moderated: [],
     },
     deps: undefined as unknown as PostsDeps,
@@ -95,6 +99,20 @@ export function makeFake(options: {
         maybeFail();
         fake.calls.deleteComment.push(commentId);
         return Promise.resolve();
+      },
+      setReaction: (_u, postId, reactionTypeId) => {
+        maybeFail();
+        fake.calls.setReaction.push({ postId, reactionTypeId });
+        return Promise.resolve({
+          post_id: postId,
+          reaction_type_id: reactionTypeId,
+          updated_at: "2026-10-14T00:00:00Z",
+        });
+      },
+      removeReaction: (_u, postId) => {
+        maybeFail();
+        fake.calls.removeReaction.push(postId);
+        return Promise.resolve({ deleted: true });
       },
     },
   };

@@ -195,4 +195,57 @@ delete from public.profiles where id in ('$E1','$E2');
 delete from auth.users where id in ('$E1','$E2');
 SQL
 
+# ---------------------------------------------------------------------------
+# 5. 共感：同じ人が同じ投稿に別々の定型文を同時に選んでも、1件に保たれる（1投稿1人1つ）
+# ---------------------------------------------------------------------------
+G1=$(uuid 0xf1); G2=$(uuid 0xf2); GPOST=$(uuid 0xe3)
+psql_run <<SQL
+delete from public.posts where id = '$GPOST';
+delete from public.profiles where id in ('$G1','$G2');
+insert into auth.users (id) values ('$G1'),('$G2') on conflict do nothing;
+insert into public.profiles (id, nickname) values ('$G1','RxOwner'),('$G2','RxFan');
+insert into public.reaction_types (id, label, is_active) overriding system value
+  values (91,'race-a',true),(92,'race-b',true) on conflict do nothing;
+insert into public.posts (id, author_id, post_type, body) values ('$GPOST','$G1','guchi','race');
+SQL
+
+( psql_run <<SQL >/dev/null
+begin;
+select public.set_reaction('$G2', '$GPOST', 91::smallint);
+select pg_sleep(3);
+commit;
+SQL
+) &
+sleep 1
+psql_run <<SQL >/dev/null
+select public.set_reaction('$G2', '$GPOST', 92::smallint);
+SQL
+wait
+
+check "同時に選んでも、共感は1件のまま" "1" \
+  "$(psql_run -c "select count(*) from public.reactions where post_id='$GPOST' and user_id='$G2'")"
+check "あとから確定した選択が残る（選び直し）" "92" \
+  "$(psql_run -c "select reaction_type_id from public.reactions where post_id='$GPOST' and user_id='$G2'")"
+
+# 共感の登録中に、投稿者がブロックしても、ブロック後の新規登録は拒否される
+psql_run <<SQL >/dev/null
+delete from public.reactions where post_id = '$GPOST';
+insert into public.blocks (blocker_id, blocked_id) values ('$G1','$G2');
+SQL
+B_OUT=$(psql_run <<SQL 2>&1
+select public.set_reaction('$G2', '$GPOST', 91::smallint);
+SQL
+)
+case "$B_OUT" in
+  *BLOCKED*) echo "ok   - ブロック後の共感は拒否される（BLOCKED）" ;;
+  *) echo "FAIL - ブロック後の共感が拒否されない: $B_OUT"; FAILED=1 ;;
+esac
+
+psql_run <<SQL
+delete from public.posts where id = '$GPOST';
+delete from public.reaction_types where id in (91,92);
+delete from public.profiles where id in ('$G1','$G2');
+delete from auth.users where id in ('$G1','$G2');
+SQL
+
 exit "$FAILED"

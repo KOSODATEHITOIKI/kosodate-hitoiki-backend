@@ -17,6 +17,7 @@ import {
   validatePostBody,
   validatePostType,
   validateReactionMode,
+  validateReactionTypeId,
   validateTopicId,
   validateUuid,
 } from "./validate.ts";
@@ -104,7 +105,7 @@ async function checkedSave<T>(
   return { saved: saved as T, supportNotice: result.supportNotice };
 }
 
-/** POST /posts（作成）、PATCH /posts/{id}（本文の編集）、DELETE /posts/{id}、PATCH /posts/{id}/reaction-mode */
+/** POST /posts（作成）、PUT・DELETE /posts/{id}/reaction（共感）、PATCH /posts/{id}（本文の編集）、DELETE /posts/{id}、PATCH /posts/{id}/reaction-mode */
 export function postsHandler(deps: PostsDeps) {
   return async (req: Request): Promise<Response> => {
     const early = preflight(req);
@@ -168,6 +169,20 @@ export function postsHandler(deps: PostsDeps) {
           200,
           await deps.db.setReactionMode(userId, id.value, mode.value, acceptance.value),
         );
+      }
+      // --- 共感（登録・選び直し・取消）。コメント受付が終了していても行える ---
+      if (route.sub === "reaction") {
+        if (req.method === "PUT") {
+          const body = await readJsonObject(req);
+          if (!body) return invalidRequest();
+          const type = validateReactionTypeId(body.reaction_type_id);
+          if (!type.ok) return invalid(type);
+          return jsonResponse(200, await deps.db.setReaction(userId, id.value, type.value));
+        }
+        if (req.method === "DELETE") {
+          return jsonResponse(200, await deps.db.removeReaction(userId, id.value));
+        }
+        return methodNotAllowed();
       }
       if (route.sub !== null) return errorResponse(404, "NOT_FOUND", "対象が見つかりません。");
 

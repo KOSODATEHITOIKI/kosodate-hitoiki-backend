@@ -380,3 +380,64 @@ Deno.test("コメント：メソッドが違えば 405、パスが違えば 404"
   );
   assertEquals((await commentsHandler(f.deps)(req("POST", "/other", {}))).status, 404);
 });
+
+// --- 共感 ---
+
+Deno.test("共感：登録・選び直し（PUT）と取消（DELETE）。受付状態は確認しない", async () => {
+  const f = makeFake();
+  const put = await postsHandler(f.deps)(
+    req("PUT", `/posts/${POST_ID}/reaction`, { reaction_type_id: 2 }),
+  );
+  assertEquals(put.status, 200);
+  assertEquals(await put.json(), {
+    post_id: POST_ID,
+    reaction_type_id: 2,
+    updated_at: "2026-10-14T00:00:00Z",
+  });
+  assertEquals(f.calls.setReaction, [{ postId: POST_ID, reactionTypeId: 2 }]);
+
+  const del = await postsHandler(f.deps)(req("DELETE", `/posts/${POST_ID}/reaction`));
+  assertEquals(del.status, 200);
+  assertEquals(await del.json(), { deleted: true });
+  assertEquals(f.calls.removeReaction, [POST_ID]);
+});
+
+Deno.test("共感：未ログインは 401。定型文の形式の不備は 422。メソッド違いは 405", async () => {
+  const f = makeFake({ loggedIn: false });
+  assertEquals(
+    (await postsHandler(f.deps)(req("PUT", `/posts/${POST_ID}/reaction`, { reaction_type_id: 1 })))
+      .status,
+    401,
+  );
+  const g = makeFake();
+  for (
+    const body of [{}, { reaction_type_id: "1" }, { reaction_type_id: 0 }, {
+      reaction_type_id: 1.5,
+    }]
+  ) {
+    assertEquals(
+      (await postsHandler(g.deps)(req("PUT", `/posts/${POST_ID}/reaction`, body))).status,
+      422,
+    );
+  }
+  assertEquals(g.calls.setReaction.length, 0);
+  assertEquals(
+    (await postsHandler(g.deps)(req("PATCH", `/posts/${POST_ID}/reaction`, {}))).status,
+    405,
+  );
+});
+
+Deno.test("共感：ブロック・利用停止・自分の投稿・見えない投稿は、それぞれ 403・404", async () => {
+  for (
+    const [rule, status] of [["BLOCKED", 403], ["RESTRICTED", 403], ["FORBIDDEN", 403], [
+      "NOT_FOUND",
+      404,
+    ], ["VALIDATION_FAILED", 422]] as const
+  ) {
+    const f = makeFake({ rule });
+    const res = await postsHandler(f.deps)(
+      req("PUT", `/posts/${POST_ID}/reaction`, { reaction_type_id: 1 }),
+    );
+    assertEquals(res.status, status, rule);
+  }
+});
