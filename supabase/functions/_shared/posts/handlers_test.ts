@@ -302,7 +302,7 @@ Deno.test("コメント作成：受付終了・ブロック・利用停止は 40
   for (
     const [rule, reason] of [
       ["COMMENTS_CLOSED", "comments_closed"],
-      ["BLOCKED", "blocked"],
+      ["BLOCKED", "unavailable"],
       ["RESTRICTED", "restricted"],
     ]
   ) {
@@ -439,5 +439,19 @@ Deno.test("共感：ブロック・利用停止・自分の投稿・見えない
       req("PUT", `/posts/${POST_ID}/reaction`, { reaction_type_id: 1 }),
     );
     assertEquals(res.status, status, rule);
+  }
+});
+
+Deno.test("ブロックされた側への拒否は、レスポンスのどこにもブロックを示す語を含めない（相手に知らせない）", async () => {
+  const f = makeFake({ rule: "BLOCKED" });
+  for (
+    const res of [
+      await commentsHandler(f.deps)(req("POST", "/comments", validComment)),
+      await postsHandler(f.deps)(req("PUT", `/posts/${POST_ID}/reaction`, { reaction_type_id: 1 })),
+    ]
+  ) {
+    assertEquals(res.status, 403);
+    const text = JSON.stringify(await res.json()).toLowerCase();
+    assert(!text.includes("block") && !text.includes("ブロック"), text);
   }
 });

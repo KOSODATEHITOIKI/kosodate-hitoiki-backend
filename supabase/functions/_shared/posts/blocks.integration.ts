@@ -118,7 +118,8 @@ Deno.test("結合：ブロックは一覧・詳細・コメントに反映され
       req("POST", "/comments", b.token, { post_id: aPost, body: "ブロックされたあとのコメント" }),
     );
     assertEquals(blocked.status, 403);
-    assertEquals((await blocked.json()).error.details.reason, "blocked");
+    const blockedBody = JSON.stringify(await blocked.json()).toLowerCase();
+    assert(!blockedBody.includes("block"), "拒否の応答がブロックを示している");
 
     // 解除すると、また見える。解除の重複はエラーにならない
     assertEquals((await a.client.from("blocks").delete().eq("blocked_id", b.userId)).error, null);
