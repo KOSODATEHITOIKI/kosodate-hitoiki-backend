@@ -45,7 +45,8 @@ function errorToResponse(e: unknown): Response {
           reason: "restricted",
         });
       case "BLOCKED":
-        return errorResponse(403, "FORBIDDEN", "この操作はできません。", { reason: "blocked" });
+        // ブロックしたことは相手に知らせない（決定済み）。理由に「ブロック」を含めず、汎用の拒否にする。
+        return errorResponse(403, "FORBIDDEN", "この操作はできません。", { reason: "unavailable" });
       case "COMMENTS_CLOSED":
         return errorResponse(403, "FORBIDDEN", "この投稿はコメントの受付を終了しています。", {
           reason: "comments_closed",
