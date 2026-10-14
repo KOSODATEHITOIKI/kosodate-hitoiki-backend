@@ -134,4 +134,65 @@ delete from public.profiles where id in ('$C','$D');
 delete from auth.users where id in ('$C','$D');
 SQL
 
+# ---------------------------------------------------------------------------
+# 4. コメント：受付終了とコメント保存が同時に走っても、受付終了後に新規コメントが保存されない
+# ---------------------------------------------------------------------------
+E1=$(uuid 0xd1); E2=$(uuid 0xd2); EPOST=$(uuid 0xe2)
+psql_run <<SQL
+delete from public.posts where id = '$EPOST';
+delete from public.profiles where id in ('$E1','$E2');
+insert into auth.users (id) values ('$E1'),('$E2') on conflict do nothing;
+insert into public.profiles (id, nickname) values ('$E1','RaceOwner'),('$E2','RaceCommenter');
+insert into public.posts (id, author_id, post_type, body, reaction_mode, comment_acceptance)
+  values ('$EPOST','$E1','soudan','race','want_comments','open');
+SQL
+
+# セッションA：受付を終了し、コミットを3秒遅らせる（その間、投稿行を排他ロックしている）
+( psql_run <<SQL >/dev/null
+begin;
+select public.set_post_reaction_mode('$E1', '$EPOST', 'want_comments', 'closed');
+select pg_sleep(3);
+commit;
+SQL
+) &
+sleep 1
+# セッションB：Aが未コミットの間にコメントを保存しようとする。Aの確定を待ち、受付終了で拒否されるはず。
+C_OUT=$(psql_run <<SQL 2>&1
+select public.create_comment('$E2', '$EPOST', null, '遅れたコメント', null);
+SQL
+)
+wait
+
+check "受付終了と同時のコメントは保存されない" "0" \
+  "$(psql_run -c "select count(*) from public.comments where post_id='$EPOST'")"
+case "$C_OUT" in
+  *COMMENTS_CLOSED*) echo "ok   - 拒否理由は受付終了（COMMENTS_CLOSED）" ;;
+  *) echo "FAIL - 拒否理由が想定と異なる: $C_OUT"; FAILED=1 ;;
+esac
+
+# 逆順：コメント保存が先に確定していれば、後から受付を終了してもコメントは残る
+psql_run <<SQL >/dev/null
+update public.posts set comment_acceptance = 'open' where id = '$EPOST';
+SQL
+( psql_run <<SQL >/dev/null
+begin;
+select public.create_comment('$E2', '$EPOST', null, '先に保存', null);
+select pg_sleep(3);
+commit;
+SQL
+) &
+sleep 1
+psql_run <<SQL >/dev/null
+select public.set_post_reaction_mode('$E1', '$EPOST', 'want_comments', 'closed');
+SQL
+wait
+check "先に確定したコメントは、受付終了後も残る" "1" \
+  "$(psql_run -c "select count(*) from public.comments where post_id='$EPOST'")"
+
+psql_run <<SQL
+delete from public.posts where id = '$EPOST';
+delete from public.profiles where id in ('$E1','$E2');
+delete from auth.users where id in ('$E1','$E2');
+SQL
+
 exit "$FAILED"

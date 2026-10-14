@@ -3,7 +3,7 @@
 -- 公開経路からプロフィール本文・認証情報・共感件数が漏れないことを確認する。
 
 BEGIN;
-SELECT plan(17);
+SELECT plan(19);
 
 -- フィクスチャ（postgresロールで作成。RLSの影響を受けない）。
 INSERT INTO auth.users (id) VALUES
@@ -37,9 +37,19 @@ SELECT throws_ok(
 );
 
 SELECT is(
-  (SELECT nickname FROM public.public_profiles WHERE id = '00000000-0000-0000-0000-00000000000a'),
+  (SELECT author_nickname FROM public.public_posts WHERE id = '00000000-0000-0000-0000-0000000000f1'),
   'ユーザーA',
-  '未ログインでも public_profiles からニックネームは取得できる'
+  '未ログインでも public_posts から投稿者のニックネームは取得できる'
+);
+
+SELECT hasnt_column('public', 'public_posts', 'author_id',
+  'public_posts に投稿者の利用者ID（author_id）は含まれない');
+
+SELECT throws_ok(
+  $$select count(*) from public.public_profiles$$,
+  '42501',
+  null,
+  '未ログインは public_profiles（利用者IDを含む）を直接参照できない'
 );
 
 SELECT hasnt_column('public', 'public_profiles', 'bio',

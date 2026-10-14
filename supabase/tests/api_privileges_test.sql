@@ -18,13 +18,13 @@ WHERE c.relkind IN ('r', 'v', 'm', 'p', 'f')
 
 SELECT is(
   (SELECT string_agg(item::text, ',' ORDER BY item::text COLLATE "C") FROM actual_table_privs WHERE item LIKE 'anon:%'),
-  'anon:public_posts:SELECT,anon:public_profiles:SELECT,anon:reaction_types:SELECT,anon:topics:SELECT',
+  'anon:public_posts:SELECT,anon:reaction_types:SELECT,anon:topics:SELECT',
   '未ログイン（anon）が持つテーブル単位の権限は、公開マスタと公開ビューのSELECTだけ'
 );
 
 SELECT is(
   (SELECT string_agg(item::text, ',' ORDER BY item::text COLLATE "C") FROM actual_table_privs WHERE item LIKE 'authenticated:%'),
-  'authenticated:account_restrictions:SELECT,authenticated:admin_users:SELECT,authenticated:app_settings:SELECT,authenticated:blocks:DELETE,authenticated:blocks:INSERT,authenticated:blocks:SELECT,authenticated:comments:SELECT,authenticated:hidden_items:DELETE,authenticated:hidden_items:INSERT,authenticated:hidden_items:SELECT,authenticated:hidden_items:UPDATE,authenticated:moderation_actions:SELECT,authenticated:muted_topics:DELETE,authenticated:muted_topics:INSERT,authenticated:muted_topics:SELECT,authenticated:muted_topics:UPDATE,authenticated:muted_words:DELETE,authenticated:muted_words:INSERT,authenticated:muted_words:SELECT,authenticated:muted_words:UPDATE,authenticated:nickname_reservations:SELECT,authenticated:notification_settings:DELETE,authenticated:notification_settings:INSERT,authenticated:notification_settings:SELECT,authenticated:notification_settings:UPDATE,authenticated:notifications:SELECT,authenticated:posts:SELECT,authenticated:profiles:SELECT,authenticated:public_posts:SELECT,authenticated:public_profiles:SELECT,authenticated:push_devices:DELETE,authenticated:push_devices:INSERT,authenticated:push_devices:SELECT,authenticated:push_devices:UPDATE,authenticated:reaction_types:SELECT,authenticated:reactions:DELETE,authenticated:reactions:INSERT,authenticated:reactions:SELECT,authenticated:reactions:UPDATE,authenticated:reports:SELECT,authenticated:saved_posts:DELETE,authenticated:saved_posts:INSERT,authenticated:saved_posts:SELECT,authenticated:saved_posts:UPDATE,authenticated:terms_acceptances:SELECT,authenticated:topics:SELECT',
+  'authenticated:account_restrictions:SELECT,authenticated:admin_users:SELECT,authenticated:app_settings:SELECT,authenticated:blocks:DELETE,authenticated:blocks:INSERT,authenticated:blocks:SELECT,authenticated:comments:SELECT,authenticated:hidden_items:DELETE,authenticated:hidden_items:INSERT,authenticated:hidden_items:SELECT,authenticated:hidden_items:UPDATE,authenticated:member_comments:SELECT,authenticated:moderation_actions:SELECT,authenticated:muted_topics:DELETE,authenticated:muted_topics:INSERT,authenticated:muted_topics:SELECT,authenticated:muted_topics:UPDATE,authenticated:muted_words:DELETE,authenticated:muted_words:INSERT,authenticated:muted_words:SELECT,authenticated:muted_words:UPDATE,authenticated:nickname_reservations:SELECT,authenticated:notification_settings:DELETE,authenticated:notification_settings:INSERT,authenticated:notification_settings:SELECT,authenticated:notification_settings:UPDATE,authenticated:notifications:SELECT,authenticated:posts:SELECT,authenticated:profiles:SELECT,authenticated:public_posts:SELECT,authenticated:public_profiles:SELECT,authenticated:push_devices:DELETE,authenticated:push_devices:INSERT,authenticated:push_devices:SELECT,authenticated:push_devices:UPDATE,authenticated:reaction_types:SELECT,authenticated:reactions:DELETE,authenticated:reactions:INSERT,authenticated:reactions:SELECT,authenticated:reactions:UPDATE,authenticated:reports:SELECT,authenticated:saved_posts:DELETE,authenticated:saved_posts:INSERT,authenticated:saved_posts:SELECT,authenticated:saved_posts:UPDATE,authenticated:terms_acceptances:SELECT,authenticated:topics:SELECT',
   'ログイン済み（authenticated）のテーブル単位の権限が想定どおり（TRUNCATE・TRIGGER・REFERENCESは持たない）'
 );
 
@@ -42,7 +42,7 @@ WHERE c.relkind IN ('r', 'v', 'm', 'p', 'f')
 
 SELECT is(
   (SELECT string_agg(item::text, ',' ORDER BY item::text COLLATE "C") FROM actual_column_privs WHERE item LIKE 'anon:%'),
-  'anon:posts.body:SELECT,anon:posts.comment_acceptance:SELECT,anon:posts.created_at:SELECT,anon:posts.hidden_at:SELECT,anon:posts.id:SELECT,anon:posts.post_type:SELECT,anon:posts.reaction_mode:SELECT,anon:posts.topic_id:SELECT,anon:posts.updated_at:SELECT',
+  'anon:posts.body:SELECT,anon:posts.comment_acceptance:SELECT,anon:posts.created_at:SELECT,anon:posts.edited_at:SELECT,anon:posts.hidden_at:SELECT,anon:posts.id:SELECT,anon:posts.post_type:SELECT,anon:posts.reaction_mode:SELECT,anon:posts.topic_id:SELECT,anon:posts.updated_at:SELECT',
   '未ログイン（anon）の列単位の権限は posts の公開列だけ（author_idは含まれない）'
 );
 
@@ -62,13 +62,13 @@ WHERE has_function_privilege(r.rolname, p.oid, 'EXECUTE');
 
 SELECT is(
   (SELECT string_agg(item::text, ',' ORDER BY item::text COLLATE "C") FROM actual_function_privs WHERE item LIKE 'anon:%'),
-  'anon:post_comment_count',
+  'anon:post_author_profile,anon:post_comment_count',
   '未ログイン（anon）が実行できる関数は公開コメント件数だけ'
 );
 
 SELECT is(
   (SELECT string_agg(item::text, ',' ORDER BY item::text COLLATE "C") FROM actual_function_privs WHERE item LIKE 'authenticated:%'),
-  'authenticated:get_post_reaction_count,authenticated:is_admin,authenticated:is_restricted,authenticated:post_comment_count',
+  'authenticated:get_post_reaction_count,authenticated:is_admin,authenticated:is_restricted,authenticated:post_author_profile,authenticated:post_comment_count',
   'ログイン済みが実行できる関数は想定した4つだけ（create_profile・トリガー関数などは実行できない）'
 );
 
