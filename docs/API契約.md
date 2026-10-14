@@ -148,6 +148,29 @@ GET /rest/v1/public_posts?select=id,post_type,topic_id,body,created_at,edited_at
 
 `public_posts`は一時非表示・削除済みを除外し、共感件数・通報情報・**投稿者の利用者ID（`author_id`）を含まない**公開ビュー（[権限表](権限表.md)2節）。投稿者の表示は`author_nickname`・`author_icon_key`・`author_avatar_path`。`edited_at`が非nullなら「編集済み」と表示する。`posts`テーブルは未ログインでは`author_id`を読めない（`select=*`も不可）。
 
+### 検索・絞り込み・ページング（未ログイン可）
+
+```http
+POST /rest/v1/rpc/search_posts
+{
+  "p_query": "夜泣き 保育園",
+  "p_post_type": "soudan",
+  "p_topic_id": 1,
+  "p_before_created_at": "2026-10-02T10:00:00Z",
+  "p_before_id": "<前ページ最後のid>",
+  "p_limit": 20
+}
+```
+
+- 引数はすべて任意。`p_query`が空なら、条件に合う公開投稿の新着一覧になる（新着順の一覧は、これまでの`public_posts`・`feed_posts`でも取得できる）。
+- 検索語は空白（全角を含む）で区切って**最大5語・全体で100文字まで**。全ての語を含む投稿を探す（AND）。全角・半角、英字の大文字・小文字を区別しない。1文字からでも検索できる。検索構文（`OR`・`-`・`列名:語`）は解釈されず、ただの文字として扱われる。
+- 検索の対象は**投稿の本文のみ**（コメントの本文は混ざらない）。結果は**新着順のみ**（人気順・関連度順にしない）。
+- ページングは`(created_at, id)`のキーセット。最後の行の`created_at`と`id`を、次の`p_before_created_at`・`p_before_id`に渡す（**両方を渡す**。片方だけは`400`）。同一時刻の投稿でも、重複・抜けがない。`p_limit`は1〜50（既定20、範囲外は丸める）。
+- 戻りは`id`・`author_id`・`post_type`・`topic_id`・`body`・`reaction_mode`・`comment_acceptance`・`created_at`・`updated_at`・`edited_at`・`comment_count`・`author_nickname`・`author_icon_key`・`author_avatar_path`。**未ログインでは`author_id`は`null`**（利用者IDを出さない）。ログイン済みには、ブロック・通報のために返す。
+- 未ログインは公開投稿のみ。ログイン済みは、個人の非表示・ブロック・話題と言葉のミュートが適用される（`feed_posts`と同じ）。一時非表示・削除済みの投稿は、どちらにも出ない。
+- エラー：不正な投稿の種類、6語以上、101文字以上、カーソルの片方だけ、は`400`（PostgRESTの標準形式で`message`が`VALIDATION_FAILED`）。
+- 方式の選定・実測は[検索方式の実測](検索方式の実測.md)。
+
 ### 投稿作成
 
 ```http

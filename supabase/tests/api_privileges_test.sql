@@ -62,14 +62,14 @@ WHERE has_function_privilege(r.rolname, p.oid, 'EXECUTE');
 
 SELECT is(
   (SELECT string_agg(item::text, ',' ORDER BY item::text COLLATE "C") FROM actual_function_privs WHERE item LIKE 'anon:%'),
-  'anon:post_author_profile,anon:post_comment_count',
-  '未ログイン（anon）が実行できる関数は公開コメント件数だけ'
+  'anon:post_author_profile,anon:post_comment_count,anon:search_posts',
+  '未ログイン（anon）が実行できる関数は、公開コメント件数・投稿者の表示情報・投稿の検索だけ'
 );
 
 SELECT is(
   (SELECT string_agg(item::text, ',' ORDER BY item::text COLLATE "C") FROM actual_function_privs WHERE item LIKE 'authenticated:%'),
-  'authenticated:get_post_reaction_count,authenticated:is_admin,authenticated:is_restricted,authenticated:post_author_profile,authenticated:post_comment_count',
-  'ログイン済みが実行できる関数は想定した4つだけ（create_profile・トリガー関数などは実行できない）'
+  'authenticated:get_post_reaction_count,authenticated:is_admin,authenticated:is_restricted,authenticated:post_author_profile,authenticated:post_comment_count,authenticated:search_posts',
+  'ログイン済みが実行できる関数は想定した6つだけ（create_profile・トリガー関数などは実行できない）'
 );
 
 -- シーケンス
