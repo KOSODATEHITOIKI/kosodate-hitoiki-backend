@@ -2,6 +2,7 @@ import { containsBannedWord } from "./banned_words.ts";
 import { normalizeForDetection } from "./normalize.ts";
 import { detectPii } from "./pii.ts";
 import { evaluateScores, isImageRejected } from "./policy.ts";
+import { needsSupportNotice } from "./support_phrases.ts";
 import type { CheckDeps, CheckResult, ModerationScores } from "./types.ts";
 
 /**
@@ -39,7 +40,10 @@ export async function checkText(
   const local = checkLocal(text);
   if (local) return local;
 
-  const { reject, confirm, supportNotice } = evaluateScores(await deps.moderate(text));
+  const scored = evaluateScores(await deps.moderate(text));
+  const { reject, confirm } = scored;
+  // 相談先の案内は、APIの判定に、ローカルの表現リスト（APIが検知しない子どもへの加害の不安など）を加える。
+  const supportNotice = scored.supportNotice || needsSupportNotice(normalizeForDetection(text));
   if (reject.length > 0) return { decision: "reject", reasons: reject, supportNotice };
   if (confirm.length > 0 && !confirmed) {
     return { decision: "confirm", reasons: confirm, supportNotice };

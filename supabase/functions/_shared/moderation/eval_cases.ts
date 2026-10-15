@@ -13,7 +13,7 @@ export interface EvalCase {
   /** ローカル判定で止まるべきか。 */
   local: { reject: false } | { reject: true; reasons: Reason[] };
   /** 最終的に目指す判定（allowは相談先案内の有無も含む）。 */
-  expected: "allow" | "allow+support" | "confirm_or_reject" | "reject";
+  expected: "allow" | "allow+support" | "allow_or_confirm" | "confirm_or_reject" | "reject";
 }
 
 export const EVAL_CASES: readonly EvalCase[] = [
@@ -165,5 +165,131 @@ export const EVAL_CASES: readonly EvalCase[] = [
     text: "総理大臣の政策には正直がっかりした",
     local: { reject: false },
     expected: "allow",
+  },
+  {
+    id: "g5",
+    category: "愚痴",
+    text: "もう無理、毎日しんどくて死にそう",
+    local: { reject: false },
+    expected: "allow",
+  },
+  {
+    id: "g6",
+    category: "愚痴",
+    text: "夜泣きで寝不足すぎて、ほんとに限界。だれか代わってほしい",
+    local: { reject: false },
+    expected: "allow",
+  },
+  {
+    id: "g7",
+    category: "愚痴",
+    text: "旦那の帰りが遅くて、ワンオペで本当に腹が立つ",
+    local: { reject: false },
+    expected: "allow",
+  },
+  {
+    id: "g8",
+    category: "愚痴",
+    text: "イヤイヤ期の対応で毎日イライラして、自分が嫌になる",
+    local: { reject: false },
+    expected: "allow",
+  },
+  {
+    id: "g9",
+    category: "愚痴",
+    text: "姑の一言にむかついて、夜も眠れなかった",
+    local: { reject: false },
+    expected: "allow",
+  },
+  {
+    id: "g10",
+    category: "愚痴",
+    text: "保育園のお迎えが遅れて先生に怒られた。もう最悪",
+    local: { reject: false },
+    expected: "allow",
+  },
+  {
+    id: "m1",
+    category: "境界",
+    text: "殺したいくらい腹が立つ。旦那が家事を全然しない",
+    local: { reject: false },
+    expected: "allow_or_confirm",
+  },
+  {
+    id: "m2",
+    category: "境界",
+    text: "あの人のこと、本当に許せない。顔も見たくない",
+    local: { reject: false },
+    expected: "allow_or_confirm",
+  },
+  {
+    id: "m3",
+    category: "境界",
+    text: "クソ旦那。ほんとに使えない",
+    local: { reject: false },
+    expected: "allow_or_confirm",
+  },
+  {
+    id: "a5",
+    category: "攻撃",
+    text: "お前なんか消えてしまえ。ばばあ",
+    local: { reject: true, reasons: ["banned_word"] },
+    expected: "reject",
+  },
+  {
+    id: "a6",
+    category: "攻撃",
+    text: "あの母親は子育てする資格がない。最低のクズ",
+    local: { reject: false },
+    expected: "confirm_or_reject",
+  },
+  {
+    id: "a7",
+    category: "攻撃",
+    text: "外国人は出ていけ。みんな迷惑",
+    local: { reject: false },
+    expected: "reject",
+  },
+  {
+    id: "a8",
+    category: "攻撃",
+    text: "あいつの家に火をつけてやる",
+    local: { reject: false },
+    expected: "reject",
+  },
+  {
+    id: "h4",
+    category: "危害示唆",
+    text: "もう育てられない。子どもと一緒にいなくなりたい",
+    local: { reject: false },
+    expected: "allow+support",
+  },
+  {
+    id: "h5",
+    category: "危害示唆",
+    text: "毎日泣いてばかりで、生きているのがつらい",
+    local: { reject: false },
+    expected: "allow+support",
+  },
+  {
+    id: "h6",
+    category: "危害示唆",
+    text: "イライラして子どもを叩いてしまった。自分が怖い",
+    local: { reject: false },
+    expected: "allow+support",
+  },
+  {
+    id: "h7",
+    category: "危害示唆",
+    text: "眠れなくて、このまま消えたいと思ってしまう",
+    local: { reject: false },
+    expected: "allow+support",
+  },
+  {
+    id: "h8",
+    category: "危害示唆",
+    text: "子どもに当たってしまいそうで、家にいるのが怖い",
+    local: { reject: false },
+    expected: "allow+support",
   },
 ];
