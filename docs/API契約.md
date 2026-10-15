@@ -124,8 +124,9 @@ Authorization: Bearer <token>
 ```
 
 - 形式はJPEG・PNG・WebP、2MBまで（アプリ側で512px四方に縮小して送る）。Content-Typeとファイルの中身（先頭のバイト列）が一致しない場合は`422`。
-- 保存前にOpenAI Moderationの画像判定で確認し、不適切なら`422 MODERATION_REJECTED`、外部API障害なら`503 MODERATION_UNAVAILABLE`（保存しない）。
-- 成功：`200`、`{ "avatar_path": "<user_id>/<id>.png" }`。公開URLはStorageの`avatars`バケットの公開URL＋`avatar_path`。差し替え時は旧画像を削除する。`DELETE`はアップロード画像を外してファイルを削除する。
+- **保存前に、位置情報（GPS）などのメタデータを取り除く**。公開バケットの画像は誰でもダウンロードできるため、画像の構造を読み、描画に必要な部分だけを残した画像を保存する（EXIF・XMP・コメント・ICC・サムネイル・画像の終端より後ろに付け足されたデータは残らない。元のバイト列は保存しない）。JPEGの向き（Orientation）だけは、位置情報を持たない最小のEXIFとして残す。構造が壊れた画像・画像データのない画像は`422`。
+- 保存前にOpenAI Moderationの画像判定で確認する（確認するのは、メタデータを除いた、実際に保存する画像）。不適切なら`422 MODERATION_REJECTED`、外部API障害なら`503 MODERATION_UNAVAILABLE`（保存しない）。確認の前に、利用者ごとのリクエスト上限（下の「レート制限」）を確かめる。
+- 成功：`200`、`{ "avatar_path": "<user_id>/<id>.png" }`。公開URLはStorageの`avatars`バケットの公開URL＋`avatar_path`。差し替え時は旧画像を削除する。`DELETE`はアップロード画像を外してファイルを削除する。**プロフィールから外れた画像（差し替え・削除・イラストへの変更・退会）は、DBが同じトランザクションで「削除待ち」に記録する**ので、Storageの削除に失敗しても、成功するまで再試行される（公開URLに画像が残らない）。
 - クライアントからStorageへ直接アップロードすることはできない。
 
 ### ニックネーム変更
@@ -147,7 +148,7 @@ Authorization: Bearer <token>
 ```
 
 - **取消期間はなく、即時に削除する**。アプリ側で「元に戻せません」と確認してから呼ぶ。`confirm: true`がなければ`422`。
-- **本人確認は、直近5分以内のログイン**。古いセッションは`403`（`details.reason: "reauth_required"`）で、アプリは再ログインを求める。
+- **本人確認は、この操作に使うセッション自身が5分以内に作られていること**（`auth.sessions`の作成時刻）。ユーザー全体の最終ログイン時刻ではないので、本人が別の端末で再ログインしても、盗まれた古いセッションでは退会できない。古いセッションは`403`（`details.reason: "reauth_required"`）で、アプリは再ログインを求める。
 - 運営者として登録されている間は`409`（`details.reason: "operator_registered"`）。先に登録を外す。
 - 成功は`200 { "status": "deleted" }`。何度実行しても安全（途中で失敗した場合は、同じ操作を再実行する）。
 - 削除されるもの・残るもの・期限は[退会とデータの保持](退会とデータの保持.md)。
@@ -410,6 +411,9 @@ Authorization: Bearer <二段階認証済みのトークン>
 
 ### レート制限・新規登録停止のエラー
 
+- **外部API（送信前チェック）を呼ぶ前に、必ず確認する**（`preflight_write`）。順番は、(1) 操作の資格（利用停止中・プロフィール未登録）、(2) 登録直後の上限（作成のみ。数えずに判定）、(3) 利用者ごとのリクエスト上限。(1)(2)で止まった要求は、外部APIを呼ばず、(3)の回数にも数えない。完了済みの`Idempotency-Key`の再送は、(2)の対象にしない（最初の結果を返せる）。
+- **利用者ごとのリクエスト上限（暫定）**：送信前チェックを呼ぶ操作（投稿・コメント・編集・プロフィール系）は10分に30回、画像は10分に10回。超えると`429 RATE_LIMITED`（`details.reason: "request_limit"`、`retry_at`）。登録直後の上限は`reason: "new_user_limit"`。
+
 - 登録直後の投稿・コメントが上限を超えると`429 RATE_LIMITED`（`details.reason: "new_user_limit"`、`details.retry_at`：制限が解ける日時）。再送（同じIdempotency-Key）は数えない。拒否された試行も数えない。
 - 新規登録の停止中、`profile-create`は新しいプロフィールを`429 RATE_LIMITED`（`details.reason: "signup_halted"`）で拒否する。アカウントの作成自体は、Authのフックが拒否する（メール・Google・Appleに共通。`429`、メッセージは「現在、新規登録を一時的にお休みしています」）。**既存の利用者のログインと、公開の閲覧は止めない**。
 
@@ -434,7 +438,7 @@ DELETE /rest/v1/push_devices?device_token=eq.<トークン>   -- ログアウト
 
 ### プッシュの配信（内部用）
 
-`POST /functions/v1/push-dispatch`（ヘッダー`x-dispatch-secret`）。配信キューを取り出してFCMへ送る。**定期実行から呼ぶ内部用で、アプリからは呼ばない**。秘密がない・違う・未設定のときは`404`（存在を明かさない）、FCMの認証情報が未設定なら`503`。応答は`{ claimed, sent, retry, invalid_token, record_failed }`。失敗は1・5・25・125分後に再試行し、5回で打ち切る。無効な端末は削除される。
+`POST /functions/v1/push-dispatch`（ヘッダー`x-job-secret`）。配信キューを取り出してFCMへ送る。**定期実行から呼ぶ内部用で、アプリからは呼ばない**。秘密がない・違う・未設定のときは`404`（存在を明かさない）、FCMの認証情報が未設定なら`503`。応答は`{ claimed, sent, retry, invalid_token, record_failed }`。失敗は1・5・25・125分後に再試行し、5回で打ち切る。無効な端末は削除される。
 
 ## 9. 本書の対象外・今後確定する事項
 

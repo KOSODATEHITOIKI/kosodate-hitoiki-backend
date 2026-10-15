@@ -16,6 +16,7 @@ import {
 } from "./handlers.ts";
 import type { ProfileDeps } from "./types.ts";
 import { createProfileDeps } from "./wiring.ts";
+import { PNG } from "./test_helpers.ts"; // 構造が正しい最小のPNG（メタデータの除去を通る）
 
 const url = Deno.env.get("SUPABASE_URL")!;
 const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -30,8 +31,6 @@ const deps: ProfileDeps = {
   moderation: { moderate: () => Promise.resolve({}) },
   imageModeration: { moderateImage: () => Promise.resolve({}) },
 };
-
-const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
 
 function req(method: string, token: string, body?: unknown, contentType = "application/json") {
   return new Request("http://localhost/fn", {

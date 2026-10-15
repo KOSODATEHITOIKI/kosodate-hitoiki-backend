@@ -25,6 +25,7 @@ CASES=(
   "moderation/actions:POST:UNAUTHENTICATED"
   "push-dispatch:POST:NOT_FOUND"
   "account-delete:POST:UNAUTHENTICATED"
+  "storage-cleanup:POST:NOT_FOUND"
 )
 
 for c in "${CASES[@]}"; do

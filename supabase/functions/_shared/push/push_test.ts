@@ -52,7 +52,7 @@ function makeDeps(opts: {
 const req = (method = "POST", secret: string | null = SECRET) =>
   new Request("http://localhost/push-dispatch", {
     method,
-    headers: secret === null ? {} : { "x-dispatch-secret": secret },
+    headers: secret === null ? {} : { "x-job-secret": secret },
   });
 
 Deno.test("配信：秘密がない・違う・未設定のときは 404。キューに触れない", async () => {
@@ -230,19 +230,85 @@ Deno.test("FCM：署名つきJWTでトークンを取り、本文を含まない
   assertEquals((send.init!.headers as Record<string, string>).Authorization, "Bearer access-1");
 });
 
-Deno.test("FCM：結果の分類（404・400は端末が無効、401は再認証、429・5xxは再試行）", async () => {
+/** FCM v1 のエラー応答の形。 */
+function fcmError(status: number, httpStatus: string, errorCode?: string, message = "error") {
+  return JSON.stringify({
+    error: {
+      code: status,
+      message,
+      status: httpStatus,
+      details: errorCode
+        ? [{ "@type": "type.googleapis.com/google.firebase.fcm.v1.FcmError", errorCode }]
+        : [],
+    },
+  });
+}
+
+function fetchReturning(status: number, body: string) {
+  const fn: typeof fetch = (input) =>
+    String(input).includes("oauth2")
+      ? Promise.resolve(
+        new Response(JSON.stringify({ access_token: "access-1", expires_in: 3600 }), {
+          status: 200,
+        }),
+      )
+      : Promise.resolve(new Response(body, { status }));
+  return fn;
+}
+
+Deno.test("FCM：端末が無効と確定できるときだけ invalid_token（UNREGISTERED、トークン不正の INVALID_ARGUMENT）", async () => {
   const { account } = await makeAccount();
-  const expect: [number, PushOutcome, string | undefined][] = [
-    [404, "invalid_token", undefined],
-    [400, "invalid_token", undefined],
-    [401, "retry", "FCM_AUTH"],
-    [429, "retry", "FCM_429"],
-    [503, "retry", "FCM_503"],
+  const invalid: [number, string][] = [
+    [404, fcmError(404, "NOT_FOUND", "UNREGISTERED", "Requested entity was not found.")],
+    [
+      400,
+      fcmError(
+        400,
+        "INVALID_ARGUMENT",
+        undefined,
+        "The registration token is not a valid FCM registration token",
+      ),
+    ],
   ];
-  for (const [status, outcome, code] of expect) {
-    const sender = createFcmSender(account, fakeFetch(status).fn, () => 1_800_000_000_000);
-    assertEquals(await sender.send(job()), code ? { outcome, errorCode: code } : { outcome });
+  for (const [status, body] of invalid) {
+    const sender = createFcmSender(account, fetchReturning(status, body), () => 1_800_000_000_000);
+    assertEquals(await sender.send(job()), { outcome: "invalid_token" }, body);
   }
+});
+
+Deno.test("FCM：設定誤り・送信の不備・認証・混雑・障害では、端末を消さずに再試行する", async () => {
+  const { account } = await makeAccount();
+  const retry: [number, string, string][] = [
+    // プロジェクトIDの誤りなどで、UNREGISTERED なしの 404 が返る
+    [404, fcmError(404, "NOT_FOUND", undefined, "Requested entity was not found."), "FCM_404"],
+    // 送信パラメータの不備（トークンとは無関係な INVALID_ARGUMENT）
+    [
+      400,
+      fcmError(400, "INVALID_ARGUMENT", undefined, "Invalid JSON payload received."),
+      "FCM_INVALID_ARGUMENT",
+    ],
+    // 応答が読めない
+    [400, "<html>bad gateway</html>", "FCM_400"],
+    [401, fcmError(401, "UNAUTHENTICATED", "THIRD_PARTY_AUTH_ERROR"), "FCM_AUTH"],
+    [403, fcmError(403, "PERMISSION_DENIED", "SENDER_ID_MISMATCH"), "FCM_AUTH"],
+    [429, fcmError(429, "RESOURCE_EXHAUSTED", "QUOTA_EXCEEDED"), "FCM_429"],
+    [503, fcmError(503, "UNAVAILABLE", "UNAVAILABLE"), "FCM_503"],
+    [500, fcmError(500, "INTERNAL"), "FCM_500"],
+  ];
+  for (const [status, body, code] of retry) {
+    const sender = createFcmSender(account, fetchReturning(status, body), () => 1_800_000_000_000);
+    assertEquals(
+      await sender.send(job()),
+      { outcome: "retry", errorCode: code },
+      `${status} ${body}`,
+    );
+  }
+});
+
+Deno.test("FCM：送れたときは sent", async () => {
+  const { account } = await makeAccount();
+  const sender = createFcmSender(account, fetchReturning(200, "{}"), () => 1_800_000_000_000);
+  assertEquals(await sender.send(job()), { outcome: "sent" });
 });
 
 Deno.test("FCM：ネットワーク失敗・トークン交換の失敗は再試行。エラーに端末トークンを含めない", async () => {

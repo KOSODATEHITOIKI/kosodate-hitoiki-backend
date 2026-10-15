@@ -1,24 +1,15 @@
 import { errorResponse, jsonResponse, methodNotAllowed, preflight } from "../http.ts";
+import { JOB_SECRET_HEADER, jobSecretMatches } from "../internal_auth.ts";
 import type { PushDeps, PushOutcome } from "./types.ts";
 
 const BATCH = 50;
 const CONCURRENCY = 10;
 
-/** 長さによらず同じ時間で比べる（秘密の一致を、応答時間から推測させない）。 */
-async function secretMatches(given: string, expected: string): Promise<boolean> {
-  const hash = async (s: string) =>
-    new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)));
-  const [a, b] = await Promise.all([hash(given), hash(expected)]);
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
-  return diff === 0;
-}
-
 const notFound = () => errorResponse(404, "NOT_FOUND", "対象が見つかりません。");
 
 /**
  * POST /push-dispatch：配信キューを取り出して、FCMへ送る。
- * 起動できるのは、秘密（x-dispatch-secret）を知っている側（定期実行）だけ。
+ * 起動できるのは、秘密（x-job-secret）を知っている側（定期実行）だけ。
  * 秘密が未設定・不一致のときは、この機能の存在を明かさない（404）。
  */
 export function pushDispatchHandler(deps: PushDeps) {
@@ -26,8 +17,7 @@ export function pushDispatchHandler(deps: PushDeps) {
     const early = preflight(req);
     if (early) return early;
 
-    const given = req.headers.get("x-dispatch-secret");
-    if (!deps.dispatchSecret || !given || !(await secretMatches(given, deps.dispatchSecret))) {
+    if (!(await jobSecretMatches(req.headers.get(JOB_SECRET_HEADER), deps.dispatchSecret))) {
       return notFound();
     }
     if (req.method !== "POST") return methodNotAllowed();

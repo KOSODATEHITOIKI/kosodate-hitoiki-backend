@@ -3,9 +3,18 @@ import {
   avatarHandler,
   changeNicknameHandler,
   createProfileHandler,
+  drainPendingDeletions,
   updateProfileHandler,
 } from "./handlers.ts";
-import { imageRequest, JPEG, jsonRequest, makeFake, PNG, USER_ID } from "./test_helpers.ts";
+import {
+  imageRequest,
+  JPEG,
+  JPEG_WITH_GPS,
+  jsonRequest,
+  makeFake,
+  PNG,
+  USER_ID,
+} from "./test_helpers.ts";
 import { DbError } from "./types.ts";
 
 const validCreate = {
@@ -298,4 +307,116 @@ Deno.test("登録：新規登録の停止中は 429（RATE_LIMITED・signup_halt
   const e = (await res.json()).error;
   assertEquals(e.code, "RATE_LIMITED");
   assertEquals(e.details.reason, "signup_halted");
+});
+
+// --- 公開前レビューへの対処 ---
+
+const contains = (bytes: Uint8Array, text: string) =>
+  new TextDecoder("latin1").decode(bytes).includes(text);
+
+Deno.test("画像：位置情報（GPS）などのメタデータを除いた画像だけを保存し、同じ画像を確認に回す", async () => {
+  const f = makeFake();
+  assert(contains(JPEG_WITH_GPS, "GPSLatitude"), "テストの画像にGPSが入っていない");
+  const res = await avatarHandler(f.deps)(imageRequest("PUT", JPEG_WITH_GPS, "image/jpeg"));
+  assertEquals(res.status, 200);
+  assertEquals(f.calls.uploadedBytes.length, 1);
+  assert(!contains(f.calls.uploadedBytes[0], "GPS"), "保存された画像に位置情報が残っている");
+  assert(!contains(f.calls.uploadedBytes[0], "Exif"));
+  // 確認に回す画像も、実際に保存する画像と同じ
+  assertEquals(f.calls.imagesChecked[0], f.calls.uploadedBytes[0]);
+});
+
+Deno.test("画像：構造が壊れている・画像データのない画像は 422。確認も保存もしない", async () => {
+  for (
+    const [bytes, type] of [
+      [new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]), "image/jpeg"], // 途中で切れたJPEG
+      [new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]), "image/png"],
+    ] as const
+  ) {
+    const f = makeFake();
+    const res = await avatarHandler(f.deps)(imageRequest("PUT", bytes, type));
+    assertEquals(res.status, 422);
+    assertEquals(f.calls.moderatedImages, 0);
+    assertEquals(f.calls.preflight, []);
+    assertEquals(f.calls.uploaded.length, 0);
+  }
+});
+
+Deno.test("外部API前の確認：画像は preflight(image) を通ってから確認する。上限なら 429 で外部APIも保存もしない", async () => {
+  const ok = makeFake();
+  await avatarHandler(ok.deps)(imageRequest("PUT", JPEG, "image/jpeg"));
+  assertEquals(ok.calls.preflight, ["image"]);
+
+  const limited = makeFake({
+    preflightError: new DbError("REQUEST_LIMITED", "2026-10-15T12:10:00.000Z"),
+  });
+  const res = await avatarHandler(limited.deps)(imageRequest("PUT", JPEG, "image/jpeg"));
+  assertEquals(res.status, 429);
+  const e = (await res.json()).error;
+  assertEquals(e.code, "RATE_LIMITED");
+  assertEquals(e.details, { reason: "request_limit", retry_at: "2026-10-15T12:10:00.000Z" });
+  assertEquals(limited.calls.moderatedImages, 0);
+  assertEquals(limited.calls.uploaded.length, 0);
+});
+
+Deno.test("外部API前の確認：プロフィールの登録・ニックネーム変更・更新は、確認の前に preflight(profile) を通る", async () => {
+  const f = makeFake();
+  await createProfileHandler(f.deps)(jsonRequest("POST", validCreate));
+  await changeNicknameHandler(f.deps)(jsonRequest("POST", { nickname: "あたらしい" }));
+  await updateProfileHandler(f.deps)(jsonRequest("PATCH", { bio: "こんにちは" }));
+  assertEquals(f.calls.preflight, ["profile", "profile", "profile"]);
+
+  for (
+    const call of [
+      (d: ReturnType<typeof makeFake>["deps"]) =>
+        createProfileHandler(d)(jsonRequest("POST", validCreate)),
+      (d: ReturnType<typeof makeFake>["deps"]) =>
+        changeNicknameHandler(d)(jsonRequest("POST", { nickname: "あたらしい" })),
+      (d: ReturnType<typeof makeFake>["deps"]) =>
+        updateProfileHandler(d)(jsonRequest("PATCH", { bio: "こんにちは" })),
+    ]
+  ) {
+    const limited = makeFake({ preflightError: new DbError("REQUEST_LIMITED") });
+    assertEquals((await call(limited.deps)).status, 429);
+    assertEquals(limited.calls.moderated, [], "上限のとき外部APIを呼んだ");
+  }
+});
+
+Deno.test("画像の削除：失敗しても操作は成功するが、削除待ちが残り、あとで必ず削除される", async () => {
+  const f = makeFake({ avatarPath: `${USER_ID}/old.png`, removeFails: true });
+  const res = await avatarHandler(f.deps)(imageRequest("PUT", PNG, "image/png"));
+  assertEquals(res.status, 200); // 利用者の操作は成功する
+  // 旧画像は削除待ちに残る（失敗の記録だけで、待ちから外れない）
+  assertEquals(f.state.pendingDeletions, [`${USER_ID}/old.png`]);
+  assert(f.calls.finishedDeletions.some((d) => d.path === `${USER_ID}/old.png` && !d.ok));
+  assertEquals(f.calls.removed, []);
+
+  // 障害が直ったあとの再試行（次の呼び出し・storage-cleanup）で、削除される
+  const recovered = makeFake({ removeFails: false });
+  recovered.state.pendingDeletions = [...f.state.pendingDeletions];
+  assertEquals(await drainPendingDeletions(recovered.deps), 1);
+  assertEquals(recovered.calls.removed, [`${USER_ID}/old.png`]);
+  assertEquals(recovered.state.pendingDeletions, []);
+});
+
+Deno.test("画像の削除：イラストへの変更・画像の削除（DELETE）でも、失敗したら削除待ちが残る", async () => {
+  const a = makeFake({ avatarPath: `${USER_ID}/old.png`, removeFails: true });
+  assertEquals(
+    (await updateProfileHandler(a.deps)(jsonRequest("PATCH", { icon_key: "bear_01" }))).status,
+    200,
+  );
+  assertEquals(a.state.pendingDeletions, [`${USER_ID}/old.png`]);
+
+  const b = makeFake({ avatarPath: `${USER_ID}/old.png`, removeFails: true });
+  const res = await avatarHandler(b.deps)(new Request("http://localhost/fn", { method: "DELETE" }));
+  assertEquals(res.status, 200);
+  assertEquals(b.state.pendingDeletions, [`${USER_ID}/old.png`]);
+});
+
+Deno.test("画像の削除：DB更新に失敗してアップロード済みの画像を取り消せなくても、削除待ちに残る", async () => {
+  const f = makeFake({ setAvatarError: new DbError("XX000"), removeFails: true });
+  const res = await avatarHandler(f.deps)(imageRequest("PUT", PNG, "image/png"));
+  assertEquals(res.status, 500);
+  assertEquals(f.calls.queued, [`${USER_ID}/fixed-id.png`]);
+  assertEquals(f.state.pendingDeletions, [`${USER_ID}/fixed-id.png`]);
 });

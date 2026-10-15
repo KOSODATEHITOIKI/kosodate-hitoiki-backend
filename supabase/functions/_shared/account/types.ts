@@ -1,8 +1,12 @@
 /** 退会（アカウント削除）。DBの withdraw_account が本体で、Edge Functionは本人確認と画像の削除を担う。 */
 export interface AuthedUser {
   userId: string;
-  /** 直近のログイン時刻（ISO 8601）。不明なら null。 */
-  lastSignInAt: string | null;
+  /**
+   * この操作に使われているセッション自身が作られた時刻（ISO 8601）。不明なら null。
+   * ユーザー全体の最終ログイン時刻ではない：別の端末で本人が再ログインしても、
+   * 盗まれた古いセッションが「直近のログイン」にならないようにするため。
+   */
+  sessionStartedAt: string | null;
 }
 
 export interface AccountDb {

@@ -97,6 +97,52 @@ function createTokenSource(
   };
 }
 
+/** FCMのエラー応答から、既知のエラーコードと説明文だけを取り出す（応答の本文そのものは保持しない）。 */
+async function readFcmError(res: Response): Promise<{ code: string | null; message: string }> {
+  try {
+    const body = await res.json();
+    const error = body?.error ?? {};
+    const details: unknown[] = Array.isArray(error.details) ? error.details : [];
+    // FcmError の errorCode（UNREGISTERED・SENDER_ID_MISMATCH など）が最も正確
+    const fcm = details.find((d) =>
+      typeof d === "object" && d !== null &&
+      typeof (d as Record<string, unknown>).errorCode === "string"
+    ) as { errorCode: string } | undefined;
+    const status = typeof error.status === "string" ? error.status : null;
+    return {
+      code: fcm?.errorCode ?? status,
+      message: typeof error.message === "string" ? error.message : "",
+    };
+  } catch {
+    return { code: null, message: "" };
+  }
+}
+
+/**
+ * 失敗の分類。**端末が無効と確定できるときだけ**、端末を削除する（invalid_token）。
+ * 404や400は、プロジェクトIDの設定誤り・送信内容の不備でも起きる。それらで有効な端末の登録と
+ * 配信キューを消さないよう、HTTPステータスだけでは判断しない。
+ *   - UNREGISTERED（アプリの削除・トークンの失効）→ 端末が無効
+ *   - INVALID_ARGUMENT のうち、メッセージがトークンの不正を指すもの → 端末が無効
+ *   - それ以外（設定誤り・送信の不備・認証・混雑・障害）→ 再試行（5回で打ち切り。端末は消さない）
+ */
+async function classifyFailure(
+  res: Response,
+  clearToken: () => void,
+): Promise<{ outcome: PushOutcome; errorCode?: string }> {
+  const { code, message } = await readFcmError(res);
+  if (code === "UNREGISTERED") return { outcome: "invalid_token" };
+  if (code === "INVALID_ARGUMENT" && /registration token|device token/i.test(message)) {
+    return { outcome: "invalid_token" };
+  }
+  if (res.status === 401 || res.status === 403 || code === "UNAUTHENTICATED") {
+    clearToken();
+    return { outcome: "retry", errorCode: "FCM_AUTH" };
+  }
+  if (code === "INVALID_ARGUMENT") return { outcome: "retry", errorCode: "FCM_INVALID_ARGUMENT" };
+  return { outcome: "retry", errorCode: `FCM_${res.status}` };
+}
+
 /** FCM HTTP v1 で送る。結果は「送れた／再試行／端末が無効」の3つに分ける。応答の本文は読まない。 */
 export function createFcmSender(
   account: ServiceAccount,
@@ -104,6 +150,7 @@ export function createFcmSender(
   nowMs: () => number = Date.now,
 ): PushSender {
   const tokens = createTokenSource(account, fetchFn, nowMs);
+  const clearToken = () => tokens.clear();
 
   return {
     async send(job: PushJob): Promise<{ outcome: PushOutcome; errorCode?: string }> {
@@ -144,15 +191,11 @@ export function createFcmSender(
         return { outcome: "retry", errorCode: "FCM_NETWORK" };
       }
 
-      await res.body?.cancel();
-      if (res.ok) return { outcome: "sent" };
-      // 登録のない端末（アプリの削除・トークンの失効）。固定の文面で送っているため、400も端末側の問題。
-      if (res.status === 404 || res.status === 400) return { outcome: "invalid_token" };
-      if (res.status === 401 || res.status === 403) {
-        tokens.clear();
-        return { outcome: "retry", errorCode: "FCM_AUTH" };
+      if (res.ok) {
+        await res.body?.cancel();
+        return { outcome: "sent" };
       }
-      return { outcome: "retry", errorCode: `FCM_${res.status}` };
+      return await classifyFailure(res, clearToken);
     },
   };
 }

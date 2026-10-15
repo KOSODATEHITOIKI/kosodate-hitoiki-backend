@@ -31,6 +31,35 @@ export function createProfileDeps(): ProfileDeps {
     },
 
     db: {
+      async preflight(userId, kind) {
+        const { error } = await admin.rpc("preflight_write", { p_user_id: userId, p_kind: kind });
+        if (error) throw toDbError(error);
+      },
+
+      async claimStorageDeletions(limit) {
+        const { data, error } = await admin.rpc("claim_storage_deletions", { p_limit: limit });
+        if (error) throw toDbError(error);
+        return (data ?? []).map((r: { path: string }) => r.path);
+      },
+
+      async finishStorageDeletion(path, ok, errorCode) {
+        const { error } = await admin.rpc("finish_storage_deletion", {
+          p_bucket: "avatars",
+          p_path: path,
+          p_ok: ok,
+          p_error: errorCode ?? null,
+        });
+        if (error) throw toDbError(error);
+      },
+
+      async queueStorageDeletion(path) {
+        const { error } = await admin.from("pending_storage_deletions").upsert(
+          { bucket: "avatars", path },
+          { onConflict: "bucket,path", ignoreDuplicates: true },
+        );
+        if (error) throw toDbError(error);
+      },
+
       async createProfile(a) {
         const { data, error } = await admin.rpc("create_profile", {
           p_user_id: a.userId,

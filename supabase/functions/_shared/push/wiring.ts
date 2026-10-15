@@ -40,7 +40,7 @@ export function createPushDeps(): PushDeps {
   return {
     db,
     sender: account ? createFcmSender(account) : unconfigured,
-    dispatchSecret: Deno.env.get("PUSH_DISPATCH_SECRET"),
+    dispatchSecret: Deno.env.get("INTERNAL_JOB_SECRET"),
     senderConfigured: account !== null,
   };
 }
