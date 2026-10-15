@@ -233,7 +233,7 @@ export const EVAL_CASES: readonly EvalCase[] = [
     id: "a5",
     category: "攻撃",
     text: "お前なんか消えてしまえ。ばばあ",
-    local: { reject: false },
+    local: { reject: true, reasons: ["banned_word"] },
     expected: "reject",
   },
   {

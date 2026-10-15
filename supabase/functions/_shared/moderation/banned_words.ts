@@ -10,6 +10,7 @@ export const BANNED_PATTERNS: readonly RegExp[] = [
   /殺すぞ|ぶっ殺|ぶち殺|殺してやる/,
   /ガイジ|がいじ|キチガイ|きちがい|池沼|知的障害者は/,
   /消えろ|失せろ/,
+  /消えてしまえ|いなくなれ|くたばれ/, // 他者への直接の死の願望（自分への「消えてしまいたい」は別の語で、止めない）
 ];
 
 export function containsBannedWord(normalizedText: string): boolean {

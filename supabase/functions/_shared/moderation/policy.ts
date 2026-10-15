@@ -1,8 +1,10 @@
 import type { ModerationScores, Reason } from "./types.ts";
 
 /**
- * Moderationスコアの閾値（設計案・未調整の初期値）。
- * 日本語の愚痴と攻撃の区別は、公開前に実例で検証して調整する（docs/送信前チェック評価.md）。
+ * Moderationスコアの閾値（設計案。評価例38件の実測にもとづく初期値）。
+ * 少数の例に合わせた調整のため、公開前に実例で再調整する（docs/送信前チェック評価.md）。
+ * 愚痴と攻撃は、harassmentのスコアだけでは区別できない（愚痴0.81・攻撃0.64の例がある）ため、
+ * rejectの閾値は下げない。
  * 調整はこのファイルだけで完結させる。
  *
  * - reject：送信を止める（他者への攻撃・差別・脅迫）
@@ -11,8 +13,8 @@ import type { ModerationScores, Reason } from "./types.ts";
  */
 export const REJECT_THRESHOLDS: Readonly<Record<string, { reason: Reason; score: number }>> = {
   "harassment": { reason: "harassment", score: 0.85 },
-  "harassment/threatening": { reason: "threat", score: 0.5 },
-  "hate": { reason: "hate", score: 0.7 },
+  "harassment/threatening": { reason: "threat", score: 0.4 }, // 実測：放火の脅迫が0.46
+  "hate": { reason: "hate", score: 0.5 }, // 実測：差別表現が0.57
   "hate/threatening": { reason: "threat", score: 0.5 },
 };
 
@@ -22,8 +24,10 @@ export const CONFIRM_THRESHOLDS: Readonly<Record<string, { reason: Reason; score
 };
 
 export const SUPPORT_THRESHOLDS: Readonly<Record<string, number>> = {
-  "self-harm": 0.4,
-  "self-harm/intent": 0.3,
+  // 案内は、出しすぎても害が小さい（本人にだけ表示する支える方向の案内）ため、漏れを減らす側に寄せる。
+  // 実測：「死ねなくてつらい」が0.16、「子どもといなくなりたい」のintentが0.10。
+  "self-harm": 0.10,
+  "self-harm/intent": 0.08,
   "self-harm/instructions": 0.3,
   "violence": 0.6,
 };
