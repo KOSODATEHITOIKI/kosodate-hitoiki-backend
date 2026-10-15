@@ -19,6 +19,9 @@ export interface ReportsDb {
   }): Promise<{ id: string; duplicate: boolean }>;
   /** admin_users に登録されているか（運営者かどうかの判定。二段階認証は別に確認する）。 */
   isRegisteredAdmin(userId: string): Promise<boolean>;
+  /** 運営設定の現在値（SETTING_KEYS のものだけ）。 */
+  getSettings(): Promise<Record<string, unknown>>;
+  setSetting(adminId: string, key: SettingKey, value: unknown): Promise<void>;
   applyModeration(a: {
     adminId: string;
     targetType: "post" | "comment" | "user";
@@ -27,6 +30,10 @@ export interface ReportsDb {
     reason: string | null;
   }): Promise<{ id: string; action: ModerationAction; restriction_stage: number | null }>;
 }
+
+/** 運営が変えられる設定のキー（DBの set_app_setting も同じ範囲だけを受け付ける）。 */
+export const SETTING_KEYS = ["new_user_limit", "new_signup_halted"] as const;
+export type SettingKey = typeof SETTING_KEYS[number];
 
 export interface AuthContext {
   userId: string;

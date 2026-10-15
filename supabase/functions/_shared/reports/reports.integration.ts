@@ -77,6 +77,16 @@ async function cleanup() {
   // 運営の対処の記録は、運営者のアカウント削除を妨げる（外部キー）ため、先に消す。
   await admin.from("moderation_actions").delete().in("admin_id", createdUsers);
   await admin.from("account_restrictions").delete().in("created_by", createdUsers);
+  // 運営設定の変更履歴・更新者も外部キーで残るため、先に外し、設定を初期値へ戻す。
+  await admin.from("app_settings_history").delete().in("changed_by", createdUsers);
+  await admin.from("app_settings").update({ updated_by: null }).in("updated_by", createdUsers);
+  await admin.from("app_settings").upsert([
+    {
+      key: "new_user_limit",
+      value: { enabled: true, window_hours: 24, max_posts: 1, max_comments: 3 },
+    },
+    { key: "new_signup_halted", value: false },
+  ]);
   for (const id of createdUsers.splice(0)) await admin.auth.admin.deleteUser(id);
 }
 
@@ -331,6 +341,122 @@ Deno.test("結合：通報→自動一時非表示→本人に確認中→運営
       ["suspend", "unhide", "warn"],
     );
     assertEquals((await ownerClient.from("reports").select("*")).data?.length, 0);
+  } finally {
+    await cleanup();
+  }
+});
+
+Deno.test("結合：新規登録の停止（本物のAuth）と登録直後の制限を、運営（二段階認証済み）が切り替える", async () => {
+  const staff = await signUp("st-admin", "うんえい");
+  const member = await signUp("st-member", "いっぱん");
+  const anon = createClient(url, anonKey, { auth: { persistSession: false } });
+  const settings = (token: string, method: string, body?: unknown) =>
+    moderationHandler(reportsDeps)(req(method, "/moderation/settings", token, body));
+  const newPost = (token: string, text: string) =>
+    postsHandler(postsDeps)(req("POST", "/posts", token, { post_type: "guchi", body: text }));
+  try {
+    // 設定を読めるのは、運営者（二段階認証済み）だけ。一般利用者には機能の存在も明かさない
+    assertEquals((await settings(member.token, "GET")).status, 404);
+    assertEquals(
+      (await settings(member.token, "PUT", { key: "new_signup_halted", value: true })).status,
+      404,
+    );
+    // 直接のRESTでも、設定は見えず、書けない
+    assertEquals((await member.client.from("app_settings").select("*")).data?.length, 0);
+    assertEquals((await anon.from("app_settings").select("*")).error !== null, true);
+    await member.client.from("app_settings").update({ value: true }).eq("key", "new_signup_halted");
+    assertEquals(
+      (await admin.from("app_settings").select("value").eq("key", "new_signup_halted").single())
+        .data?.value,
+      false,
+    );
+    assertEquals(
+      (await member.client.rpc("set_app_setting", {
+        p_admin_id: member.userId,
+        p_key: "new_signup_halted",
+        p_value: true,
+      })).error !== null,
+      true,
+    );
+
+    await admin.from("admin_users").insert({ user_id: staff.userId });
+    // 二段階認証前（aal1）は拒否
+    const aal1 = await settings(staff.token, "PUT", { key: "new_signup_halted", value: true });
+    assertEquals(aal1.status, 403);
+    assertEquals((await aal1.json()).error.details.reason, "mfa_required");
+    const staffToken = await elevateToAal2(staff);
+    assertEquals(jwtAal(staffToken), "aal2");
+
+    // 登録直後の制限：新規の利用者は、投稿1件まで（削除しても戻らない）
+    assertEquals((await newPost(member.token, "1件目")).status, 201);
+    const second = await newPost(member.token, "2件目");
+    assertEquals(second.status, 429);
+    const sb = (await second.json()).error;
+    assertEquals(sb.code, "RATE_LIMITED");
+    assertEquals(sb.details.reason, "new_user_limit");
+    assert(!Number.isNaN(Date.parse(sb.details.retry_at)), "解除の日時が返らない");
+    // 運営者は上限を変えられる（制限値は設定で変わる）
+    const raised = await settings(staffToken, "PUT", {
+      key: "new_user_limit",
+      value: { enabled: true, window_hours: 24, max_posts: 2, max_comments: 3 },
+    });
+    assertEquals(raised.status, 200);
+    assertEquals((await newPost(member.token, "上限を上げた後")).status, 201);
+    // 形の違う値・範囲外は拒否され、設定は変わらない
+    assertEquals(
+      (await settings(staffToken, "PUT", {
+        key: "new_user_limit",
+        value: { enabled: true, window_hours: 0, max_posts: 2, max_comments: 3 },
+      })).status,
+      422,
+    );
+
+    // 新規登録の停止：本物のAuthで、メールでの新規作成が拒否される。既存の利用者のログインは通る
+    assertEquals(
+      (await settings(staffToken, "PUT", { key: "new_signup_halted", value: true })).status,
+      200,
+    );
+    const haltedEmail = `halted-${crypto.randomUUID()}@example.com`;
+    const newcomer = createClient(url, anonKey, { auth: { persistSession: false } });
+    const signup = await newcomer.auth.signUp({
+      email: haltedEmail,
+      password: "test-password-12345",
+    });
+    assert(signup.error !== null, "停止中に新規アカウントが作れてしまった");
+    assertEquals(
+      (await admin.auth.admin.listUsers({ perPage: 200 })).data.users.some((u) =>
+        u.email === haltedEmail
+      ),
+      false,
+    );
+    const relogin = createClient(url, anonKey, { auth: { persistSession: false } });
+    assertEquals(
+      (await relogin.auth.signInWithPassword({ email: member.email, password: member.password }))
+        .error,
+      null,
+      "停止中でも既存の利用者はログインできる",
+    );
+    assertEquals(
+      (await anon.from("public_posts").select("id")).error,
+      null,
+      "停止中でも公開の閲覧はできる",
+    );
+    // 再開すると、新規登録できる
+    assertEquals(
+      (await settings(staffToken, "PUT", { key: "new_signup_halted", value: false })).status,
+      200,
+    );
+    const resumed = await newcomer.auth.signUp({
+      email: haltedEmail,
+      password: "test-password-12345",
+    });
+    assertEquals(resumed.error, null);
+    if (resumed.data.user) createdUsers.push(resumed.data.user.id);
+
+    // 変更の履歴が残る（誰が・いつ・何を）
+    const history = await admin.from("app_settings_history").select("key,changed_by")
+      .eq("changed_by", staff.userId);
+    assertEquals(history.data?.length, 3);
   } finally {
     await cleanup();
   }

@@ -303,4 +303,43 @@ delete from public.profiles where id in ('$H1','$H2','$H3','$H4');
 delete from auth.users where id in ('$H1','$H2','$H3','$H4');
 SQL
 
+# ---------------------------------------------------------------------------
+# 7. 登録直後の制限：新規の利用者が投稿を同時に2件作っても、上限（1件）を超えない
+# ---------------------------------------------------------------------------
+L1=$(uuid 0xd1)
+psql_run <<SQL
+insert into auth.users (id) values ('$L1') on conflict do nothing;
+insert into public.profiles (id, nickname) values ('$L1', 'どうじせいげん') on conflict do nothing;
+delete from public.write_events where user_id = '$L1';
+update public.app_settings set value = '{"enabled": true, "window_hours": 24, "max_posts": 1, "max_comments": 3}' where key = 'new_user_limit';
+SQL
+
+( psql_run <<SQL
+begin;
+select public.create_post('$L1', 'guchi', null, '同時1', 'quiet_support', null);
+select pg_sleep(3);
+commit;
+SQL
+) >/dev/null 2>&1 &
+sleep 1
+L_OUT=$(psql_run <<SQL 2>&1
+select public.create_post('$L1', 'guchi', null, '同時2', 'quiet_support', null);
+SQL
+)
+wait
+
+check "同時の投稿で、上限（1件）を超えて保存されない" "1" \
+  "$(psql_run -c "select count(*) from public.posts where author_id='$L1'")"
+case "$L_OUT" in
+  *RATE_LIMITED*) echo "ok   - 後から来た投稿は RATE_LIMITED で拒否される" ;;
+  *) echo "FAIL - 後から来た投稿が制限されない: $L_OUT"; FAILED=1 ;;
+esac
+
+psql_run <<SQL
+delete from public.write_events where user_id = '$L1';
+delete from public.posts where author_id = '$L1';
+delete from public.profiles where id = '$L1';
+delete from auth.users where id = '$L1';
+SQL
+
 exit "$FAILED"

@@ -53,7 +53,12 @@ export interface PostsDeps {
 
 /** DB関数が返す業務ルール違反。メッセージの内部コードだけを保持する。 */
 export class RuleError extends Error {
-  constructor(public readonly code: string, public readonly publicMessage?: string) {
+  constructor(
+    public readonly code: string,
+    public readonly publicMessage?: string,
+    /** RATE_LIMITED のとき、制限が解ける日時（ISO 8601）。 */
+    public readonly retryAt?: string,
+  ) {
     super("rule violation");
     this.name = "RuleError";
   }
@@ -68,6 +73,7 @@ const RULE_CODES = new Set([
   "COMMENTS_CLOSED",
   "PROFILE_REQUIRED",
   "VALIDATION_FAILED",
+  "RATE_LIMITED",
 ]);
 
 /** 親コメントの階層・所属違反（既存トリガーのメッセージ）。利用者に見せてよい文言だけ通す。 */
@@ -78,8 +84,17 @@ const PARENT_RULE_MESSAGES = new Set([
 ]);
 
 /** PostgRESTのエラーを RuleError へ。コードか既知の文言以外（本文・内部情報を含みうるもの）は捨てる。 */
-export function toRuleError(e: { code?: string; message?: string }): Error {
+export function toRuleError(e: { code?: string; message?: string; details?: string }): Error {
   if (e.code === "P0001" && e.message) {
+    if (e.message === "RATE_LIMITED") {
+      // DETAILに入る「制限が解ける日時」だけを取り出す（日時として読めないものは捨てる）。
+      const t = e.details ? new Date(e.details) : null;
+      return new RuleError(
+        e.message,
+        undefined,
+        t && !Number.isNaN(t.getTime()) ? t.toISOString() : undefined,
+      );
+    }
     if (RULE_CODES.has(e.message)) return new RuleError(e.message);
     if (PARENT_RULE_MESSAGES.has(e.message)) return new RuleError("VALIDATION_FAILED", e.message);
   }

@@ -7,7 +7,7 @@ import {
   unauthenticated,
 } from "../http.ts";
 import type { Validated } from "../profile/validate.ts";
-import { type ReportsDeps, ReportsRuleError } from "./types.ts";
+import { type ReportsDeps, ReportsRuleError, SETTING_KEYS, type SettingKey } from "./types.ts";
 import {
   validateDetail,
   validateModerationAction,
@@ -92,6 +92,11 @@ export function reportsHandler(deps: ReportsDeps) {
   };
 }
 
+/** `/moderation/settings` に対応づける（関数名より前の接頭辞は無視）。 */
+export function isModerationSettingsPath(pathname: string): boolean {
+  return /(?:^|\/)moderation\/settings\/?$/.test(pathname);
+}
+
 /** `/moderation/actions` に対応づける（関数名より前の接頭辞は無視）。 */
 export function isModerationActionsPath(pathname: string): boolean {
   return /(?:^|\/)moderation\/actions\/?$/.test(pathname);
@@ -107,10 +112,14 @@ export function moderationHandler(deps: ReportsDeps) {
   return async (req: Request): Promise<Response> => {
     const early = preflight(req);
     if (early) return early;
-    if (!isModerationActionsPath(new URL(req.url).pathname)) {
+    const pathname = new URL(req.url).pathname;
+    const isActions = isModerationActionsPath(pathname);
+    const isSettings = isModerationSettingsPath(pathname);
+    if (!isActions && !isSettings) {
       return errorResponse(404, "NOT_FOUND", "対象が見つかりません。");
     }
-    if (req.method !== "POST") return methodNotAllowed();
+    if (isActions && req.method !== "POST") return methodNotAllowed();
+    if (isSettings && req.method !== "GET" && req.method !== "PUT") return methodNotAllowed();
 
     const auth = await deps.authenticate(req);
     if (!auth) return unauthenticated();
@@ -123,6 +132,22 @@ export function moderationHandler(deps: ReportsDeps) {
         return errorResponse(403, "FORBIDDEN", "二段階認証が必要です。", {
           reason: "mfa_required",
         });
+      }
+
+      if (isSettings) {
+        if (req.method === "GET") {
+          return jsonResponse(200, { settings: await deps.db.getSettings() });
+        }
+        // PUT：{ key, value }。値の形・範囲の検証はDB関数（set_app_setting）が行う（二重の確認）。
+        const b = await readJsonObject(req);
+        if (!b) return invalidRequest();
+        if (!(SETTING_KEYS as readonly unknown[]).includes(b.key) || !("value" in b)) {
+          return errorResponse(422, "VALIDATION_FAILED", "設定のキーまたは値が正しくありません。", {
+            field: "key",
+          });
+        }
+        await deps.db.setSetting(auth.userId, b.key as SettingKey, b.value);
+        return jsonResponse(200, { settings: await deps.db.getSettings() });
       }
 
       const body = await readJsonObject(req);

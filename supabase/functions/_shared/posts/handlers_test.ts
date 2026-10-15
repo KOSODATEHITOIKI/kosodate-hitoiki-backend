@@ -1,6 +1,7 @@
 import { assert, assertEquals } from "@std/assert";
 import { commentsHandler, postsHandler, routeComments, routePosts } from "./handlers.ts";
 import { COMMENT_ID, makeFake, POST_ID, req, USER_ID } from "./test_helpers.ts";
+import { RuleError, toRuleError } from "./types.ts";
 
 const validPost = { post_type: "guchi", body: "今日は大変だった", reaction_mode: "quiet_support" };
 
@@ -454,4 +455,38 @@ Deno.test("ブロックされた側への拒否は、レスポンスのどこに
     const text = JSON.stringify(await res.json()).toLowerCase();
     assert(!text.includes("block") && !text.includes("ブロック"), text);
   }
+});
+
+Deno.test("登録直後の制限：投稿もコメントも 429（RATE_LIMITED）。保存されない", async () => {
+  const f = makeFake({ rule: "RATE_LIMITED" });
+  const res = await postsHandler(f.deps)(req("POST", "/posts", validPost));
+  assertEquals(res.status, 429);
+  const e = await errorBody(res);
+  assertEquals(e.code, "RATE_LIMITED");
+  assertEquals((e.details as { reason: string }).reason, "new_user_limit");
+
+  const c = makeFake({ rule: "RATE_LIMITED" });
+  const res2 = await commentsHandler(c.deps)(
+    req("POST", "/comments", { post_id: POST_ID, body: "こんにちは" }),
+  );
+  assertEquals(res2.status, 429);
+});
+
+Deno.test("登録直後の制限：DBが返す解除の日時を retry_at に入れる。日時でないものは捨てる", () => {
+  const ok = toRuleError({
+    code: "P0001",
+    message: "RATE_LIMITED",
+    details: "2026-10-16 01:32:14.210116+00",
+  });
+  assert(ok instanceof RuleError);
+  assertEquals(ok.code, "RATE_LIMITED");
+  assertEquals(ok.retryAt, "2026-10-16T01:32:14.210Z");
+
+  const bad = toRuleError({
+    code: "P0001",
+    message: "RATE_LIMITED",
+    details: "内部の情報 SELECT *",
+  });
+  assert(bad instanceof RuleError);
+  assertEquals(bad.retryAt, undefined);
 });

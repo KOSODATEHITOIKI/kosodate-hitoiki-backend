@@ -290,3 +290,12 @@ Deno.test("画像：未ログインは 401", async () => {
   assertEquals(res.status, 401);
   assertEquals(f.calls.moderatedImages, 0);
 });
+
+Deno.test("登録：新規登録の停止中は 429（RATE_LIMITED・signup_halted）。DBの文言は返さない", async () => {
+  const f = makeFake({ dbError: new DbError("SIGNUP_HALTED") });
+  const res = await createProfileHandler(f.deps)(jsonRequest("POST", validCreate));
+  assertEquals(res.status, 429);
+  const e = (await res.json()).error;
+  assertEquals(e.code, "RATE_LIMITED");
+  assertEquals(e.details.reason, "signup_halted");
+});
