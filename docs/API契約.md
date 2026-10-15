@@ -138,6 +138,20 @@ Authorization: Bearer <token>
 
 成功時`200`、旧名を`nickname_reservations`へ30日予約。初回の変更は制限なし、以降は前回の変更から30日空ける（違反は`422 VALIDATION_FAILED`）。旧名は他の人が30日使用できない（本人は再利用可）。送信前チェックあり。
 
+### 退会（アカウント削除）
+
+```http
+POST /functions/v1/account-delete
+Authorization: Bearer <token>
+{ "confirm": true }
+```
+
+- **取消期間はなく、即時に削除する**。アプリ側で「元に戻せません」と確認してから呼ぶ。`confirm: true`がなければ`422`。
+- **本人確認は、直近5分以内のログイン**。古いセッションは`403`（`details.reason: "reauth_required"`）で、アプリは再ログインを求める。
+- 運営者として登録されている間は`409`（`details.reason: "operator_registered"`）。先に登録を外す。
+- 成功は`200 { "status": "deleted" }`。何度実行しても安全（途中で失敗した場合は、同じ操作を再実行する）。
+- 削除されるもの・残るもの・期限は[退会とデータの保持](退会とデータの保持.md)。
+
 ## 3. 投稿
 
 ### 一覧取得（未ログイン可）
