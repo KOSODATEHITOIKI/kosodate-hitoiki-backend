@@ -1,7 +1,7 @@
 -- 公開前レビューの指摘への対処の検証：画像の削除待ち・外部API前の確認・セッションの作成時刻。
 
 BEGIN;
-SELECT plan(28);
+SELECT plan(37);
 
 INSERT INTO auth.users (id) VALUES
   ('00000000-0000-0000-0000-0000000000f1'), -- 新規の利用者
@@ -49,6 +49,47 @@ SELECT is((SELECT count(*)::int FROM public.pending_storage_deletions WHERE path
 
 -- 注意：Auth（GoTrue）の権限（supabase_auth_admin）でのユーザー削除は、pgTAPからロールを切り替えられないため、
 -- 結合テスト（functions/_shared/profile/images.integration.ts）で、本物のAuthのユーザー削除で確認している。
+
+-- === アップロード前の回収用の記録（reserve）とアトミックな結び付け（set_avatar_path） ===
+DELETE FROM public.pending_storage_deletions;
+INSERT INTO auth.users (id) VALUES ('00000000-0000-0000-0000-0000000000f6');
+INSERT INTO public.profiles (id, nickname, avatar_path)
+VALUES ('00000000-0000-0000-0000-0000000000f6', 'けっぷのひと', '00000000-0000-0000-0000-0000000000f6/before.png');
+
+SELECT public.reserve_storage_upload('00000000-0000-0000-0000-0000000000f6/after.png');
+SELECT is((SELECT count(*)::int FROM public.claim_storage_deletions(10)), 0,
+  'アップロード前の記録は、猶予（10分）の間は回収の対象にならない（アップロードの途中で消さない）');
+UPDATE public.pending_storage_deletions SET next_attempt_at = now() - interval '1 second'
+WHERE path = '00000000-0000-0000-0000-0000000000f6/after.png';
+SELECT is((SELECT path FROM public.claim_storage_deletions(10)), '00000000-0000-0000-0000-0000000000f6/after.png',
+  '結び付けに失敗したまま猶予が過ぎた画像は、DBが回復すれば回収の対象になる（DB障害でも画像を取り残さない）');
+SELECT is((SELECT count(*)::int FROM public.claim_storage_deletions(10)), 0,
+  '取り出した行は貸し出し中になり、別の処理が同じ行を取り合わない');
+
+-- 結び付けに成功すると、新しい画像の記録は同じトランザクションで消え、旧画像が削除待ちに記録される
+SELECT public.reserve_storage_upload('00000000-0000-0000-0000-0000000000f6/linked.png');
+SELECT public.set_avatar_path('00000000-0000-0000-0000-0000000000f6', '00000000-0000-0000-0000-0000000000f6/linked.png');
+SELECT is((SELECT avatar_path FROM public.profiles WHERE id = '00000000-0000-0000-0000-0000000000f6'),
+  '00000000-0000-0000-0000-0000000000f6/linked.png', '画像のパスが設定される');
+SELECT is((SELECT count(*)::int FROM public.pending_storage_deletions
+           WHERE path = '00000000-0000-0000-0000-0000000000f6/linked.png'), 0,
+  '結び付けた画像の回収用の記録は消える（使用中の画像が回収の対象として残らない）');
+SELECT is((SELECT count(*)::int FROM public.pending_storage_deletions
+           WHERE path = '00000000-0000-0000-0000-0000000000f6/before.png'), 1,
+  '外れた旧画像は削除待ちに記録される');
+
+-- === 失敗し続ける行が、後続を止めない（再試行の間隔とローテーション） ===
+DELETE FROM public.pending_storage_deletions;
+INSERT INTO public.pending_storage_deletions (bucket, path, created_at, next_attempt_at)
+SELECT 'avatars', 'stuck/' || g, now() - interval '2 days', now() - interval '1 hour' FROM generate_series(1, 100) g;
+SELECT is((SELECT count(*)::int FROM public.claim_storage_deletions(100)), 100, '取得の上限（100件）まで取り出される');
+SELECT public.finish_storage_deletion('avatars', 'stuck/' || g, false, 'STORAGE_503') FROM generate_series(1, 100) g;
+INSERT INTO public.pending_storage_deletions (bucket, path) VALUES ('avatars', 'new/after-failures.png');
+SELECT is((SELECT array_agg(path) FROM public.claim_storage_deletions(100)), ARRAY['new/after-failures.png'],
+  '失敗し続ける100件が上限を埋めていても、後から加わった行が処理される（失敗した行は間隔を延ばして後ろに回る）');
+SELECT ok((SELECT next_attempt_at > now() + interval '1 minute' AND next_attempt_at < now() + interval '3 minutes'
+           FROM public.pending_storage_deletions WHERE path = 'stuck/1'),
+  '1回目の失敗の再試行は約2分後（回数に応じて倍々に延びる）');
 
 -- === 外部API前の確認：操作の資格 ===
 SELECT throws_ok($$SELECT public.preflight_write('00000000-0000-0000-0000-0000000000f3', 'post')$$, 'P0001', 'RESTRICTED',

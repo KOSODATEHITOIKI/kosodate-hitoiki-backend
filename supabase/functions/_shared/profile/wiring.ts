@@ -52,11 +52,8 @@ export function createProfileDeps(): ProfileDeps {
         if (error) throw toDbError(error);
       },
 
-      async queueStorageDeletion(path) {
-        const { error } = await admin.from("pending_storage_deletions").upsert(
-          { bucket: "avatars", path },
-          { onConflict: "bucket,path", ignoreDuplicates: true },
-        );
+      async reserveStorageUpload(path) {
+        const { error } = await admin.rpc("reserve_storage_upload", { p_path: path });
         if (error) throw toDbError(error);
       },
 
@@ -97,11 +94,15 @@ export function createProfileDeps(): ProfileDeps {
       },
 
       async setAvatarPath(userId, path) {
-        const values = path ? { avatar_path: path, icon_key: null } : { avatar_path: null };
-        const { data, error } = await admin.from("profiles").update(values).eq("id", userId)
-          .select("id");
-        if (error) throw toDbError(error);
-        if (!data || data.length === 0) throw new DbError("NOT_FOUND");
+        // 1つのトランザクションで、プロフィールの更新（旧画像はトリガーが削除待ちに記録）と、
+        // 新しい画像の回収用の記録の削除を行う。
+        const { error } = await admin.rpc("set_avatar_path", { p_user_id: userId, p_path: path });
+        if (error) {
+          if (error.code === "P0001" && error.message === "NOT_FOUND") {
+            throw new DbError("NOT_FOUND");
+          }
+          throw toDbError(error);
+        }
       },
     },
 

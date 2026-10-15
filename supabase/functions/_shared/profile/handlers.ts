@@ -318,15 +318,14 @@ export function avatarHandler(deps: ProfileDeps) {
       if (blocked) return blocked;
 
       const path = `${userId}/${(deps.newId ?? crypto.randomUUID.bind(crypto))()}.${ext}`;
+      // アップロードの「前」に、回収用の記録を残す。記録できない（DBの障害）ときは、アップロードしない。
+      // こうしておけば、このあとの結び付けが失敗しても、DBの障害が続いても、画像を取り残さない
+      // （記録は猶予（10分）のあと、DBが回復すれば回収される）。
+      await deps.db.reserveStorageUpload(path);
       await deps.storage.upload(path, clean, mimeType);
-      try {
-        await deps.db.setAvatarPath(userId, path); // 旧画像は、トリガーが削除待ちに記録する
-      } catch (e) {
-        // DB更新に失敗したら、アップロード済みの画像を取り消す（失敗しても削除待ちに残して再試行する）。
-        await deps.db.queueStorageDeletion(path).catch(() => {});
-        await drainPendingDeletions(deps);
-        throw e;
-      }
+      // 結び付けの成否が分からない失敗（応答の喪失など）もあるため、ここでは画像を直接削除しない。
+      // 結び付けに成功していれば、DBが回収用の記録を消している。失敗していれば、記録から回収される。
+      await deps.db.setAvatarPath(userId, path); // 旧画像は、トリガーが削除待ちに記録する
       await drainPendingDeletions(deps);
       return jsonResponse(200, { avatar_path: path });
     } catch (e) {

@@ -271,12 +271,12 @@ Deno.test("画像：外部APIの障害では 503 で保存しない", async () =
   assertEquals(f.calls.uploaded.length, 0);
 });
 
-Deno.test("画像：DB更新に失敗したら、アップロード済みの画像を取り消す", async () => {
+Deno.test("画像：DB更新に失敗したら 500。アップロード済みの画像は、回収用の記録から回収される", async () => {
   const f = makeFake({ setAvatarError: new DbError("XX000") });
   const res = await avatarHandler(f.deps)(imageRequest("PUT", PNG, "image/png"));
   assertEquals(res.status, 500);
   assertEquals(f.calls.uploaded, [`${USER_ID}/fixed-id.png`]);
-  assertEquals(f.calls.removed, [`${USER_ID}/fixed-id.png`]);
+  assertEquals(f.state.reserved, [`${USER_ID}/fixed-id.png`]);
 });
 
 Deno.test("画像：保存先は必ず本人のフォルダ配下", async () => {
@@ -413,10 +413,30 @@ Deno.test("画像の削除：イラストへの変更・画像の削除（DELETE
   assertEquals(b.state.pendingDeletions, [`${USER_ID}/old.png`]);
 });
 
-Deno.test("画像の削除：DB更新に失敗してアップロード済みの画像を取り消せなくても、削除待ちに残る", async () => {
-  const f = makeFake({ setAvatarError: new DbError("XX000"), removeFails: true });
+Deno.test("画像の回収：アップロードの前に回収用の記録を残し、結び付けに成功すると記録は消える", async () => {
+  const f = makeFake();
+  const res = await avatarHandler(f.deps)(imageRequest("PUT", PNG, "image/png"));
+  assertEquals(res.status, 200);
+  assertEquals(f.calls.reserved, [`${USER_ID}/fixed-id.png`]);
+  assertEquals(f.state.reserved, [], "結び付けた画像の記録が残っている");
+  assertEquals(f.calls.removed, [], "使用中の画像を削除してはいけない");
+});
+
+Deno.test("画像の回収：回収用の記録を残せない（DB障害）ときは、アップロードしない。画像は取り残されない", async () => {
+  const f = makeFake({ reserveFails: true });
   const res = await avatarHandler(f.deps)(imageRequest("PUT", PNG, "image/png"));
   assertEquals(res.status, 500);
-  assertEquals(f.calls.queued, [`${USER_ID}/fixed-id.png`]);
-  assertEquals(f.state.pendingDeletions, [`${USER_ID}/fixed-id.png`]);
+  assertEquals(f.calls.uploaded, [], "記録なしでアップロードした");
+  assertEquals(f.calls.setAvatarPath, []);
+});
+
+Deno.test("画像の回収：結び付けに失敗しても、画像を直接は消さず、回収用の記録を残す（成否が分からない失敗に備える）", async () => {
+  const f = makeFake({ setAvatarError: new DbError("XX000") });
+  const res = await avatarHandler(f.deps)(imageRequest("PUT", PNG, "image/png"));
+  assertEquals(res.status, 500);
+  assertEquals(f.calls.uploaded, [`${USER_ID}/fixed-id.png`]);
+  // 記録が残るので、DBが回復すれば猶予（10分）のあとに回収される。直接削除はしない
+  // （結び付けに成功していた場合に、使用中の画像を消してしまわないため）
+  assertEquals(f.state.reserved, [`${USER_ID}/fixed-id.png`]);
+  assertEquals(f.calls.removed, []);
 });

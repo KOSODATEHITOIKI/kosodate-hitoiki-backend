@@ -12,12 +12,17 @@ create table public.pending_storage_deletions (
   path text not null,
   attempts integer not null default 0,
   last_error text,
+  -- 次に試す時刻。失敗した行は間隔を延ばして後ろに回し、失敗し続ける行が後続を止めないようにする。
+  -- アップロード前に記録した行（reserve_storage_upload）は、アップロードが終わるまでの猶予として先にする。
+  next_attempt_at timestamptz not null default now(),
   created_at timestamptz not null default now(),
   primary key (bucket, path)
 );
 
 comment on table public.pending_storage_deletions is
   'Storageから削除すべきファイルの待ち行列。削除に成功したら行を消す。last_errorはコードだけ。service_role専用。';
+
+create index pending_storage_deletions_due_idx on public.pending_storage_deletions (next_attempt_at);
 
 alter table public.pending_storage_deletions enable row level security;
 grant all on public.pending_storage_deletions to service_role;
@@ -48,19 +53,68 @@ create trigger profiles_after_delete_queue_avatar
   after delete on public.profiles
   for each row execute function public.profiles_queue_avatar_deletion();
 
--- 削除待ちを取り出す。古い順。
+-- アップロードの「前」に、回収用の記録を残す。アップロードしたのに、プロフィールへの結び付け（set_avatar_path）が
+-- 失敗しても、DBの障害が続いていても、この記録から画像を回収できる。猶予（10分）の間は回収の対象にしない
+-- （アップロードの途中で消してしまわないように）。結び付けが成功すると、set_avatar_path が同じトランザクションで
+-- この記録を消す。記録できなければ、アップロードしない（呼び出し側が中止する）。
+create or replace function public.reserve_storage_upload(p_path text)
+returns void
+language sql
+set search_path = public
+as $$
+  insert into public.pending_storage_deletions (bucket, path, next_attempt_at)
+  values ('avatars', p_path, now() + interval '10 minutes')
+  on conflict do nothing;
+$$;
+
+-- アカウント画像のパスを設定する（NULLなら、アップロード画像を外す）。1つのトランザクションで、
+-- プロフィールの更新（旧画像はトリガーが削除待ちに記録）と、新しい画像の回収用の記録の削除を行う。
+-- 結び付いた画像が回収の対象として残る状態を作らない。
+create or replace function public.set_avatar_path(p_user_id uuid, p_path text)
+returns void
+language plpgsql
+set search_path = public
+as $$
+begin
+  if p_path is null then
+    update public.profiles set avatar_path = null where id = p_user_id;
+  else
+    update public.profiles set avatar_path = p_path, icon_key = null where id = p_user_id;
+  end if;
+  if not found then
+    raise exception 'NOT_FOUND' using errcode = 'P0001';
+  end if;
+  if p_path is not null then
+    delete from public.pending_storage_deletions where bucket = 'avatars' and path = p_path;
+  end if;
+end;
+$$;
+
+-- 削除待ちを取り出す。時刻が来たものだけを、予定の古い順に。取り出した行は5分間「貸し出し」にして
+-- （次に試す時刻を先送り）、同時に動く別の処理が同じ行を取り合わない。失敗した行は finish で間隔を延ばして
+-- 後ろに回るので、失敗し続ける行が取得枠を占有して、後から加わった行を止めることはない。
 create or replace function public.claim_storage_deletions(p_limit integer default 20)
 returns table (bucket text, path text)
 language sql
 set search_path = public
 as $$
-  select d.bucket, d.path
-  from public.pending_storage_deletions d
-  order by d.created_at
-  limit greatest(1, least(p_limit, 200));
+  with due as (
+    select d.bucket, d.path
+    from public.pending_storage_deletions d
+    where d.next_attempt_at <= now()
+    order by d.next_attempt_at, d.created_at
+    limit greatest(1, least(p_limit, 200))
+    for update skip locked
+  )
+  update public.pending_storage_deletions d
+  set next_attempt_at = now() + interval '5 minutes'
+  from due
+  where d.bucket = due.bucket and d.path = due.path
+  returning d.bucket, d.path;
 $$;
 
--- 結果の記録。成功したら行を消す。失敗したら回数を増やす（エラーはコードだけ）。
+-- 結果の記録。成功したら行を消す。失敗したら回数を増やし、次に試す時刻を延ばす
+-- （2分・4分・8分…と倍々に、最大24時間）。エラーはコードだけ。
 create or replace function public.finish_storage_deletion(p_bucket text, p_path text, p_ok boolean, p_error text default null)
 returns void
 language plpgsql
@@ -72,6 +126,7 @@ begin
   else
     update public.pending_storage_deletions
     set attempts = attempts + 1,
+        next_attempt_at = now() + interval '1 minute' * least(power(2, attempts + 1), 1440),
         last_error = case when p_error ~ '^[A-Za-z0-9_]{1,40}$' then p_error else 'UNKNOWN' end
     where bucket = p_bucket and path = p_path;
   end if;
@@ -301,6 +356,8 @@ declare
 begin
   foreach fn in array array[
     'public.profiles_queue_avatar_deletion()',
+    'public.reserve_storage_upload(text)',
+    'public.set_avatar_path(uuid, text)',
     'public.claim_storage_deletions(integer)',
     'public.finish_storage_deletion(text, text, boolean, text)',
     'public.new_user_limit_status(uuid, text)',

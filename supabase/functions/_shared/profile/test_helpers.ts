@@ -16,13 +16,13 @@ export interface Fake {
     moderatedImages: number;
     preflight: string[];
     finishedDeletions: { path: string; ok: boolean }[];
-    queued: string[];
+    reserved: string[];
     /** 画像のチェック（外部API）に渡された画像のバイト列。 */
     imagesChecked: Uint8Array[];
     /** Storageへアップロードされた画像のバイト列。 */
     uploadedBytes: Uint8Array[];
   };
-  state: { avatarPath: string | null; pendingDeletions: string[] };
+  state: { avatarPath: string | null; pendingDeletions: string[]; reserved: string[] };
 }
 
 export function makeFake(options: {
@@ -38,6 +38,8 @@ export function makeFake(options: {
   preflightError?: DbError;
   /** Storageの削除が失敗する。 */
   removeFails?: boolean;
+  /** アップロード前の回収用の記録（reserve）が失敗する（DBの障害）。 */
+  reserveFails?: boolean;
 } = {}): Fake {
   const fake: Fake = {
     calls: {
@@ -51,11 +53,11 @@ export function makeFake(options: {
       moderatedImages: 0,
       preflight: [],
       finishedDeletions: [],
-      queued: [],
+      reserved: [],
       imagesChecked: [],
       uploadedBytes: [],
     },
-    state: { avatarPath: options.avatarPath ?? null, pendingDeletions: [] },
+    state: { avatarPath: options.avatarPath ?? null, pendingDeletions: [], reserved: [] },
     deps: undefined as unknown as ProfileDeps,
   };
   const maybeFail = () => {
@@ -93,9 +95,10 @@ export function makeFake(options: {
         if (ok) fake.state.pendingDeletions = fake.state.pendingDeletions.filter((p) => p !== path);
         return Promise.resolve();
       },
-      queueStorageDeletion: (path) => {
-        fake.calls.queued.push(path);
-        fake.state.pendingDeletions.push(path);
+      reserveStorageUpload: (path) => {
+        if (options.reserveFails) return Promise.reject(new DbError("XX000"));
+        fake.calls.reserved.push(path);
+        fake.state.reserved.push(path);
         return Promise.resolve();
       },
       createProfile: (args) => {
@@ -127,6 +130,8 @@ export function makeFake(options: {
           fake.state.pendingDeletions.push(fake.state.avatarPath);
         }
         fake.state.avatarPath = path;
+        // 本番ではDBが同じトランザクションで、結び付けた画像の回収用の記録を消す
+        if (path) fake.state.reserved = fake.state.reserved.filter((p) => p !== path);
         return Promise.resolve();
       },
     },

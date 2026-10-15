@@ -12,8 +12,12 @@ export interface ProfileDb {
   claimStorageDeletions(limit: number): Promise<string[]>;
   /** 削除待ちの結果を記録する。成功なら待ちから外し、失敗なら回数を増やす。 */
   finishStorageDeletion(path: string, ok: boolean, errorCode?: string): Promise<void>;
-  /** 削除待ちに加える（アップロードしたが、プロフィールに結び付けられなかった画像）。 */
-  queueStorageDeletion(path: string): Promise<void>;
+  /**
+   * アップロードの「前」に、回収用の記録を残す（猶予は10分）。アップロードしたのに結び付けが失敗しても、
+   * DBの障害が続いていても、この記録から画像を回収できる。結び付け（setAvatarPath）に成功すると、
+   * DBが同じトランザクションでこの記録を消す。記録できなければ、アップロードしてはいけない。
+   */
+  reserveStorageUpload(path: string): Promise<void>;
   /** プロフィール・利用規約同意・通知設定を1トランザクションで作る（create_profile）。 */
   createProfile(args: {
     userId: string;
