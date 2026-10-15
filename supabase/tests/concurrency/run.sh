@@ -342,4 +342,49 @@ delete from public.profiles where id = '$L1';
 delete from auth.users where id = '$L1';
 SQL
 
+# ---------------------------------------------------------------------------
+# 8. プッシュ配信：2つの配信が同時に動いても、同じ配信を取り合わない（二重送信しない）
+# ---------------------------------------------------------------------------
+P1=$(uuid 0xd1)
+psql_run <<SQL
+insert into auth.users (id) values ('$P1') on conflict do nothing;
+insert into public.profiles (id, nickname) values ('$P1', 'はいしんてすと') on conflict do nothing;
+delete from public.push_devices where user_id = '$P1';
+delete from public.notifications where user_id = '$P1';
+insert into public.push_devices (user_id, platform, device_token) values ('$P1', 'ios', 'concurrency-token-p1-0001');
+insert into public.notifications (user_id, notification_type, reaction_count, digest_until, digest_date)
+select '$P1', 'reaction_digest', 1, now(), (current_date - g) from generate_series(1, 20) g;
+SQL
+
+CLAIM_A=$(mktemp); CLAIM_B=$(mktemp)
+( psql_run <<SQL >"$CLAIM_A" 2>/dev/null
+begin;
+create temp table got as select delivery_id from public.claim_push_deliveries(10);
+select delivery_id from got;
+select pg_sleep(3);
+commit;
+SQL
+) &
+sleep 1
+psql_run <<SQL >"$CLAIM_B" 2>/dev/null
+begin;
+create temp table got as select delivery_id from public.claim_push_deliveries(10);
+select delivery_id from got;
+commit;
+SQL
+wait
+
+A_N=$(grep -c . "$CLAIM_A"); B_N=$(grep -c . "$CLAIM_B")
+BOTH=$(cat "$CLAIM_A" "$CLAIM_B" | grep . | sort | uniq -d | wc -l | tr -d " ")
+check "同時の取り出し：それぞれが10件を取り出す" "10/10" "$A_N/$B_N"
+check "同時の取り出し：同じ配信を2か所で取り出さない" "0" "$BOTH"
+rm -f "$CLAIM_A" "$CLAIM_B"
+
+psql_run <<SQL
+delete from public.notifications where user_id = '$P1';
+delete from public.push_devices where user_id = '$P1';
+delete from public.profiles where id = '$P1';
+delete from auth.users where id = '$P1';
+SQL
+
 exit "$FAILED"

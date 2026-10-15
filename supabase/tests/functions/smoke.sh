@@ -23,6 +23,7 @@ CASES=(
   "comments:POST:UNAUTHENTICATED"
   "reports:POST:UNAUTHENTICATED"
   "moderation/actions:POST:UNAUTHENTICATED"
+  "push-dispatch:POST:NOT_FOUND"
 )
 
 for c in "${CASES[@]}"; do

@@ -406,11 +406,21 @@ GET   /rest/v1/notifications?select=*&order=created_at.desc&limit=20
 Authorization: Bearer <token>
 
 PATCH /rest/v1/notifications?id=eq.<id>          { "is_read": true }
-PATCH /rest/v1/notification_settings?user_id=eq.<自分> { "comments_enabled": false }
-POST  /rest/v1/push_devices                       { "platform": "ios", "device_token": "..." }
+PATCH /rest/v1/notification_settings?user_id=eq.<自分> { "comments_enabled": false }   -- replies_enabled / reactions_enabled / push_enabled も同様
+POST  /rest/v1/rpc/register_push_device           { "p_platform": "ios", "p_token": "<FCMのトークン>" }
+DELETE /rest/v1/push_devices?device_token=eq.<トークン>   -- ログアウト時の解除
 ```
 
-共感の集約通知（`reaction_digest`）の生成方式・頻度は未決定のため、生成側の実装は#19で追加する。
+- **通知を読める・既読にできるのは、受信者本人だけ**。既読の更新は`is_read`だけ（宛先などは書き換えられない）。ブロックした相手が起こした通知は表示されない。未読の件数は`?is_read=eq.false`と`Prefer: count=exact`で取る。
+- 通知の種類：`comment`（自分の投稿へのコメント）・`reply`（自分のコメントへの返信）・`reaction_digest`（共感のまとめ。`reaction_count`）・`moderation`（運営からのお知らせ）。**共感のまとめ通知は、誰が共感したかを持たない**。
+- 共感のまとめ通知は、毎朝7時（日本時間）に、前回以降の共感を投稿者ごとに1通にして作る。自分の共感・ブロックした相手の共感・一時非表示の投稿への共感は数えない。
+- 通知の設定を止めた種類は、通知自体が作られない。`push_enabled`を止めた場合は、アプリ内の通知は作られ、プッシュだけ送られない。運営からのお知らせは止められない。
+- **端末の登録は`register_push_device`だけ**（直接のINSERT/UPDATEは拒否される）。同じ端末で別の人がログインしたら、持ち主が新しい人に移り、前の人宛ての未送信のプッシュは届かない。
+- **プッシュの文面は定型文だけ**（「あなたの投稿にコメントが届きました」など）。投稿・コメントの本文、相手のニックネーム、共感の数は含めない。プッシュの`data`には、種類（`type`）と通知ID（`notification_id`）だけを入れる。アプリが開いたときに、通知IDから取得して表示する。
+
+### プッシュの配信（内部用）
+
+`POST /functions/v1/push-dispatch`（ヘッダー`x-dispatch-secret`）。配信キューを取り出してFCMへ送る。**定期実行から呼ぶ内部用で、アプリからは呼ばない**。秘密がない・違う・未設定のときは`404`（存在を明かさない）、FCMの認証情報が未設定なら`503`。応答は`{ claimed, sent, retry, invalid_token, record_failed }`。失敗は1・5・25・125分後に再試行し、5回で打ち切る。無効な端末は削除される。
 
 ## 9. 本書の対象外・今後確定する事項
 
