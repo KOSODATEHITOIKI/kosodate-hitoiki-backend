@@ -3,6 +3,15 @@ import type { CommentAcceptance, PostType, ReactionMode } from "./validate.ts";
 
 /** DB関数（RPC）の呼び出し。実装は wiring.ts、テストではフェイクを使う。 */
 export interface PostsDb {
+  /**
+   * 外部API（送信前チェック）を呼ぶ前の確認。操作の資格（利用停止・プロフィール）、登録直後の上限、
+   * 利用者ごとのリクエスト上限。通らなければ、外部APIを呼ばずに止める。
+   */
+  preflight(
+    userId: string,
+    kind: "post" | "comment" | "edit",
+    idempotencyKey?: string | null,
+  ): Promise<void>;
   createPost(a: {
     userId: string;
     postType: PostType;
@@ -74,6 +83,7 @@ const RULE_CODES = new Set([
   "PROFILE_REQUIRED",
   "VALIDATION_FAILED",
   "RATE_LIMITED",
+  "REQUEST_LIMITED",
 ]);
 
 /** 親コメントの階層・所属違反（既存トリガーのメッセージ）。利用者に見せてよい文言だけ通す。 */
@@ -86,7 +96,7 @@ const PARENT_RULE_MESSAGES = new Set([
 /** PostgRESTのエラーを RuleError へ。コードか既知の文言以外（本文・内部情報を含みうるもの）は捨てる。 */
 export function toRuleError(e: { code?: string; message?: string; details?: string }): Error {
   if (e.code === "P0001" && e.message) {
-    if (e.message === "RATE_LIMITED") {
+    if (e.message === "RATE_LIMITED" || e.message === "REQUEST_LIMITED") {
       // DETAILに入る「制限が解ける日時」だけを取り出す（日時として読めないものは捨てる）。
       const t = e.details ? new Date(e.details) : null;
       return new RuleError(

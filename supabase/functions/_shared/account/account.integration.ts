@@ -227,3 +227,59 @@ Deno.test("結合：退会すると、ログインできず、データと画像
     await cleanup();
   }
 });
+
+/** ローカルのDBコンテナでSQLを実行する（セッションの作成時刻を過去にするために使う）。 */
+async function psql(sql: string) {
+  const out = await new Deno.Command("docker", {
+    args: [
+      "exec",
+      "-i",
+      "supabase_db_kosodate-hitoiki-backend",
+      "psql",
+      "-U",
+      "postgres",
+      "-c",
+      sql,
+    ],
+    stdout: "null",
+    stderr: "piped",
+  }).output();
+  if (!out.success) throw new Error("psql failed");
+}
+
+function sessionIdOf(token: string): string {
+  const part = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+  return JSON.parse(atob(part.padEnd(Math.ceil(part.length / 4) * 4, "="))).session_id;
+}
+
+Deno.test("結合：退会の本人確認は、操作に使うセッション自身で判定する（別の端末で再ログインしても、古いセッションは通らない）", async () => {
+  const user = await signUp("wd-session", "せっしょんのひと");
+  try {
+    // 本人が別の端末でログインした（新しいセッションB）。盗まれた古いセッションAは、1時間前に作られたとする。
+    const second = await createClient(url, anonKey, { auth: { persistSession: false } })
+      .auth.signInWithPassword({ email: user.email, password: user.password });
+    assert(second.data.session, "2回目のログインに失敗");
+    const tokenB = second.data.session.access_token;
+    assert(sessionIdOf(user.token) !== sessionIdOf(tokenB), "セッションが同じ");
+    await psql(
+      "update auth.sessions set created_at = now() - interval '1 hour' where id = '" +
+        sessionIdOf(user.token) + "'",
+    );
+
+    // 古いセッションA：ユーザーとしては直近にログインしているが、このセッションは古いので拒否される
+    const stale = await accountDeleteHandler(accountDeps)(
+      req("POST", "/account-delete", user.token, { confirm: true }),
+    );
+    assertEquals(stale.status, 403);
+    assertEquals((await stale.json()).error.details, { reason: "reauth_required" });
+    assertEquals((await admin.auth.admin.getUserById(user.userId)).data.user?.id, user.userId);
+
+    // 新しいセッションB：通る
+    const fresh = await accountDeleteHandler(accountDeps)(
+      req("POST", "/account-delete", tokenB, { confirm: true }),
+    );
+    assertEquals(fresh.status, 200);
+  } finally {
+    await cleanup();
+  }
+});

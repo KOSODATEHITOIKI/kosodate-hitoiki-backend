@@ -3,6 +3,21 @@ import type { CheckDeps } from "../moderation/types.ts";
 
 /** DB操作。実装は wiring.ts（supabase-js＋service_role）、テストではフェイクを使う。 */
 export interface ProfileDb {
+  /**
+   * 外部API（送信前チェック）を呼ぶ前の確認（利用者ごとのリクエスト上限）。
+   * profile＝テキスト、image＝画像（画像は枠が小さい）。
+   */
+  preflight(userId: string, kind: "profile" | "image"): Promise<void>;
+  /** Storageから削除すべきファイル（削除待ち）を取り出す。 */
+  claimStorageDeletions(limit: number): Promise<string[]>;
+  /** 削除待ちの結果を記録する。成功なら待ちから外し、失敗なら回数を増やす。 */
+  finishStorageDeletion(path: string, ok: boolean, errorCode?: string): Promise<void>;
+  /**
+   * アップロードの「前」に、回収用の記録を残す（猶予は10分）。アップロードしたのに結び付けが失敗しても、
+   * DBの障害が続いていても、この記録から画像を回収できる。結び付け（setAvatarPath）に成功すると、
+   * DBが同じトランザクションでこの記録を消す。記録できなければ、アップロードしてはいけない。
+   */
+  reserveStorageUpload(path: string): Promise<void>;
   /** プロフィール・利用規約同意・通知設定を1トランザクションで作る（create_profile）。 */
   createProfile(args: {
     userId: string;
@@ -54,8 +69,16 @@ const KNOWN_RULE_MESSAGES = new Set([
 ]);
 
 /** PostgRESTのエラーから、コードと利用者向けの文言だけを取り出す（生のメッセージは捨てる）。 */
-export function toDbError(e: { code?: string; message?: string }): DbError {
+export function toDbError(e: { code?: string; message?: string; details?: string }): DbError {
   if (e.code === "P0001" && e.message === "SIGNUP_HALTED") return new DbError("SIGNUP_HALTED");
+  if (e.code === "P0001" && e.message === "REQUEST_LIMITED") {
+    // DETAILに入る「制限が解ける日時」だけを取り出す（日時として読めないものは捨てる）。
+    const t = e.details ? new Date(e.details) : null;
+    return new DbError(
+      "REQUEST_LIMITED",
+      t && !Number.isNaN(t.getTime()) ? t.toISOString() : undefined,
+    );
+  }
   const hint = e.code === "P0001" && e.message && KNOWN_RULE_MESSAGES.has(e.message)
     ? e.message
     : undefined;

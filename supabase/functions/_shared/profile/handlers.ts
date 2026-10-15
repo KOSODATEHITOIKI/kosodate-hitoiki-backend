@@ -9,6 +9,7 @@ import {
 import { checkImage } from "../moderation/check.ts";
 import { responseForDecision, responseForError } from "../moderation/http.ts";
 import { moderateAndSave } from "../moderation/moderate_and_save.ts";
+import { stripImageMetadata } from "./image_metadata.ts";
 import { DbError, type ProfileDeps } from "./types.ts";
 import {
   validateBio,
@@ -41,6 +42,14 @@ function errorToResponse(e: unknown): Response {
     }
     if (e.code === "NOT_FOUND") {
       return errorResponse(404, "NOT_FOUND", "プロフィールが見つかりません。");
+    }
+    if (e.code === "REQUEST_LIMITED") {
+      return errorResponse(
+        429,
+        "RATE_LIMITED",
+        "操作が多すぎます。しばらくしてからもう一度お試しください。",
+        { reason: "request_limit", retry_at: e.hint },
+      );
     }
     if (e.code === "SIGNUP_HALTED") {
       return errorResponse(
@@ -86,6 +95,7 @@ export function createProfileHandler(deps: ProfileDeps) {
     if (!terms.ok) return invalid(terms);
 
     try {
+      await deps.db.preflight(userId, "profile"); // 外部API（送信前チェック）の前に、リクエスト上限を確認する
       const { result, saved } = await moderateAndSave(
         { nickname: nickname.value, bio: bio.value ?? "" },
         deps.moderation,
@@ -130,6 +140,7 @@ export function changeNicknameHandler(deps: ProfileDeps) {
     if (!nickname.ok) return invalid(nickname);
 
     try {
+      await deps.db.preflight(userId, "profile");
       const { result } = await moderateAndSave(
         { nickname: nickname.value },
         deps.moderation,
@@ -179,9 +190,9 @@ export function updateProfileHandler(deps: ProfileDeps) {
     if (Object.keys(patch).length === 0) return invalidRequest();
 
     try {
-      // イラストを選ぶと、アップロード画像は外れる（どちらか一方）。旧画像は保存後に削除する。
-      const oldAvatar = patch.icon_key ? await deps.db.getAvatarPath(userId) : null;
-
+      await deps.db.preflight(userId, "profile");
+      // イラストを選ぶと、アップロード画像は外れる（どちらか一方）。外れた画像は、DBのトリガーが
+      // 削除待ちに記録するので、あとで必ず削除される（下の drainPendingDeletions）。
       const { result } = await moderateAndSave(
         { bio: patch.bio ?? "" },
         deps.moderation,
@@ -191,7 +202,7 @@ export function updateProfileHandler(deps: ProfileDeps) {
       const blocked = responseForDecision(result);
       if (blocked) return blocked;
 
-      if (oldAvatar) await removeQuietly(deps, oldAvatar);
+      if (patch.icon_key) await drainPendingDeletions(deps);
       return jsonResponse(200, { support_notice: result.supportNotice });
     } catch (e) {
       return errorToResponse(e);
@@ -221,13 +232,28 @@ export function matchesImageSignature(bytes: Uint8Array, mimeType: string): bool
   }
 }
 
-async function removeQuietly(deps: ProfileDeps, path: string): Promise<void> {
+/**
+ * 削除待ちの画像（DBのトリガーが、プロフィールから外れた画像を記録している）を、Storageから削除する。
+ * 失敗しても利用者の操作は失敗させないが、記録が残るので、次の呼び出しや定期実行（storage-cleanup）で
+ * 成功するまで再試行される。公開バケットに、URLを知る人が見られる画像を残さないための仕組み。
+ */
+export async function drainPendingDeletions(deps: ProfileDeps, limit = 10): Promise<number> {
+  let removed = 0;
   try {
-    await deps.storage.remove(path);
+    for (const path of await deps.db.claimStorageDeletions(limit)) {
+      try {
+        await deps.storage.remove(path);
+        await deps.db.finishStorageDeletion(path, true);
+        removed++;
+      } catch {
+        await deps.db.finishStorageDeletion(path, false, "STORAGE_ERROR").catch(() => {});
+        console.error("avatar cleanup failed");
+      }
+    }
   } catch {
-    // 旧画像の削除失敗は利用者の操作を失敗させない（孤立ファイルは定期清掃で回収する想定）。
     console.error("avatar cleanup failed");
   }
+  return removed;
 }
 
 /** PUT：画像をアップロードして設定（確認後にサーバーが保存）／DELETE：アップロード画像を外す。 */
@@ -242,10 +268,8 @@ export function avatarHandler(deps: ProfileDeps) {
     try {
       if (req.method === "DELETE") {
         const old = await deps.db.getAvatarPath(userId);
-        if (old) {
-          await deps.db.setAvatarPath(userId, null);
-          await removeQuietly(deps, old);
-        }
+        if (old) await deps.db.setAvatarPath(userId, null); // 旧画像は、トリガーが削除待ちに記録する
+        await drainPendingDeletions(deps);
         return jsonResponse(200, { avatar_path: null });
       }
 
@@ -277,21 +301,32 @@ export function avatarHandler(deps: ProfileDeps) {
         });
       }
 
+      // 位置情報（GPS）などのメタデータを取り除く。公開バケットの画像は誰でもダウンロードできるため、
+      // 描画に必要な部分だけを残した画像を保存する（元のバイト列は保存しない）。読めない画像は拒否する。
+      const clean = stripImageMetadata(bytes, mimeType);
+      if (!clean || clean.length === 0) {
+        return errorResponse(422, "VALIDATION_FAILED", "画像ファイルを読み取れませんでした。", {
+          field: "image",
+        });
+      }
+
+      // 外部API（画像のチェック）を呼ぶ前に、利用者ごとのリクエスト上限を確認する。
+      await deps.db.preflight(userId, "image");
       // 保存前に確認する。不適切なら保存しない。API障害時は保存しない（ModerationUnavailableError）。
-      const blocked = responseForDecision(await checkImage(bytes, mimeType, deps.imageModeration));
+      // 確認するのは、実際に保存する（メタデータを除いた）画像。
+      const blocked = responseForDecision(await checkImage(clean, mimeType, deps.imageModeration));
       if (blocked) return blocked;
 
       const path = `${userId}/${(deps.newId ?? crypto.randomUUID.bind(crypto))()}.${ext}`;
-      await deps.storage.upload(path, bytes, mimeType);
-      let old: string | null;
-      try {
-        old = await deps.db.getAvatarPath(userId);
-        await deps.db.setAvatarPath(userId, path);
-      } catch (e) {
-        await removeQuietly(deps, path); // DB更新に失敗したら、アップロード済みの画像を取り消す
-        throw e;
-      }
-      if (old) await removeQuietly(deps, old);
+      // アップロードの「前」に、回収用の記録を残す。記録できない（DBの障害）ときは、アップロードしない。
+      // こうしておけば、このあとの結び付けが失敗しても、DBの障害が続いても、画像を取り残さない
+      // （記録は猶予（10分）のあと、DBが回復すれば回収される）。
+      await deps.db.reserveStorageUpload(path);
+      await deps.storage.upload(path, clean, mimeType);
+      // 結び付けの成否が分からない失敗（応答の喪失など）もあるため、ここでは画像を直接削除しない。
+      // 結び付けに成功していれば、DBが回収用の記録を消している。失敗していれば、記録から回収される。
+      await deps.db.setAvatarPath(userId, path); // 旧画像は、トリガーが削除待ちに記録する
+      await drainPendingDeletions(deps);
       return jsonResponse(200, { avatar_path: path });
     } catch (e) {
       return errorToResponse(e);

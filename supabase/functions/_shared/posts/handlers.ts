@@ -62,6 +62,13 @@ function errorToResponse(e: unknown): Response {
           "登録したばかりのため、投稿・コメントの回数に上限があります。時間をおいてからお試しください。",
           { reason: "new_user_limit", retry_at: e.retryAt },
         );
+      case "REQUEST_LIMITED":
+        return errorResponse(
+          429,
+          "RATE_LIMITED",
+          "操作が多すぎます。しばらくしてからもう一度お試しください。",
+          { reason: "request_limit", retry_at: e.retryAt },
+        );
       case "VALIDATION_FAILED":
         return errorResponse(
           422,
@@ -98,10 +105,15 @@ async function context(deps: PostsDeps, req: Request) {
 /** 本文を送信前チェックにかけ、通ったものだけを保存する。 */
 async function checkedSave<T>(
   deps: PostsDeps,
+  userId: string,
+  kind: "post" | "comment" | "edit",
+  idempotencyKey: string | null,
   body: string,
   confirmed: boolean,
   save: (verifiedBody: string) => Promise<T>,
 ): Promise<{ blocked: Response } | { saved: T; supportNotice: boolean }> {
+  // 外部API（送信前チェック）を呼ぶ前に、操作の資格・上限・リクエスト数を確認する。
+  await deps.db.preflight(userId, kind, idempotencyKey);
   const { result, saved } = await moderateAndSave(
     { body },
     deps.moderation,
@@ -145,6 +157,9 @@ export function postsHandler(deps: PostsDeps) {
 
         const out = await checkedSave(
           deps,
+          userId,
+          "post",
+          key.value,
           text.value,
           body.confirmed === true,
           (verified) =>
@@ -202,6 +217,9 @@ export function postsHandler(deps: PostsDeps) {
         if (!text.ok) return invalid(text);
         const out = await checkedSave(
           deps,
+          userId,
+          "edit",
+          null,
           text.value,
           body.confirmed === true,
           (verified) => deps.db.updatePostBody(userId, id.value, verified),
@@ -256,6 +274,9 @@ export function commentsHandler(deps: PostsDeps) {
 
         const out = await checkedSave(
           deps,
+          userId,
+          "comment",
+          key.value,
           text.value,
           body.confirmed === true,
           (verified) =>
@@ -282,6 +303,9 @@ export function commentsHandler(deps: PostsDeps) {
         if (!text.ok) return invalid(text);
         const out = await checkedSave(
           deps,
+          userId,
+          "edit",
+          null,
           text.value,
           body.confirmed === true,
           (verified) => deps.db.updateCommentBody(userId, id.value, verified),

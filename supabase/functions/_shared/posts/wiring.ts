@@ -23,6 +23,13 @@ export function createPostsDeps(): PostsDeps {
   }
 
   const db: PostsDb = {
+    preflight: async (userId, kind, idempotencyKey) => {
+      await rpc("preflight_write", {
+        p_user_id: userId,
+        p_kind: kind,
+        p_idempotency_key: idempotencyKey ?? null,
+      });
+    },
     createPost: (a) =>
       rpc("create_post", {
         p_user_id: a.userId,

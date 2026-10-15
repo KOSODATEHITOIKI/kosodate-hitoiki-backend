@@ -18,6 +18,7 @@ export interface Fake {
     setReaction: { postId: string; reactionTypeId: number }[];
     removeReaction: string[];
     moderated: string[];
+    preflight: string[];
   };
 }
 
@@ -28,6 +29,8 @@ export function makeFake(options: {
   /** DB関数が返す業務ルール違反（内部コード）。 */
   rule?: string;
   ruleMessage?: string;
+  /** 外部API前の確認（preflight）が返す業務ルール違反（内部コード）。 */
+  preflightRule?: string;
   /** DB関数が想定外のエラーを返す。 */
   unexpected?: boolean;
 } = {}): Fake {
@@ -43,6 +46,7 @@ export function makeFake(options: {
       setReaction: [],
       removeReaction: [],
       moderated: [],
+      preflight: [],
     },
     deps: undefined as unknown as PostsDeps,
   };
@@ -62,6 +66,11 @@ export function makeFake(options: {
       },
     },
     db: {
+      preflight: (_u, kind) => {
+        fake.calls.preflight.push(kind);
+        if (options.preflightRule) throw new RuleError(options.preflightRule);
+        return Promise.resolve();
+      },
       createPost: (a) => {
         maybeFail();
         fake.calls.createPost.push(a);

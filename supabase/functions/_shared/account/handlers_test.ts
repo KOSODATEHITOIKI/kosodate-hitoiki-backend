@@ -6,7 +6,7 @@ const NOW = Date.parse("2026-10-15T12:00:00Z");
 const iso = (agoMs: number) => new Date(NOW - agoMs).toISOString();
 
 function makeFake(opts: {
-  auth?: { userId: string; lastSignInAt: string | null } | null;
+  auth?: { userId: string; sessionStartedAt: string | null } | null;
   operator?: boolean;
   storageFails?: boolean;
   withdrawRule?: string;
@@ -18,7 +18,7 @@ function makeFake(opts: {
     now: () => NOW,
     authenticate: () =>
       Promise.resolve(
-        opts.auth === undefined ? { userId: "u-1", lastSignInAt: iso(60_000) } : opts.auth,
+        opts.auth === undefined ? { userId: "u-1", sessionStartedAt: iso(60_000) } : opts.auth,
       ),
     db: {
       isOperator: () => {
@@ -65,15 +65,15 @@ Deno.test("退会：確認（confirm: true）がなければ 422。何も削除�
   }
 });
 
-Deno.test("退会：本人確認は直近5分以内のログイン。古い・不明なら 403（reauth_required）", async () => {
+Deno.test("退会：本人確認は、このセッションが5分以内に作られていること。古い・不明なら 403（reauth_required）", async () => {
   for (const last of [iso(RECENT_LOGIN_MS + 1000), iso(24 * 3600 * 1000), null, "not-a-date"]) {
-    const f = makeFake({ auth: { userId: "u-1", lastSignInAt: last } });
+    const f = makeFake({ auth: { userId: "u-1", sessionStartedAt: last } });
     const res = await accountDeleteHandler(f.deps)(req());
     assertEquals(res.status, 403);
     assertEquals((await code(res)).details, { reason: "reauth_required" });
     assertEquals(f.calls, [], "本人確認の前に何も削除してはいけない");
   }
-  const edge = makeFake({ auth: { userId: "u-1", lastSignInAt: iso(RECENT_LOGIN_MS - 1000) } });
+  const edge = makeFake({ auth: { userId: "u-1", sessionStartedAt: iso(RECENT_LOGIN_MS - 1000) } });
   assertEquals((await accountDeleteHandler(edge.deps)(req())).status, 200);
 });
 

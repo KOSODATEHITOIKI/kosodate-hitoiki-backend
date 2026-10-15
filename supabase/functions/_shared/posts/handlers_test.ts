@@ -490,3 +490,63 @@ Deno.test("登録直後の制限：DBが返す解除の日時を retry_at に入
   assert(bad instanceof RuleError);
   assertEquals(bad.retryAt, undefined);
 });
+
+// --- 公開前レビューへの対処：外部API（送信前チェック）を呼ぶ前の確認 ---
+
+Deno.test("外部API前の確認：投稿・コメント・編集は、送信前チェックの前に preflight を通る", async () => {
+  const f = makeFake();
+  await postsHandler(f.deps)(req("POST", "/posts", validPost));
+  await commentsHandler(f.deps)(req("POST", "/comments", { post_id: POST_ID, body: "こんにちは" }));
+  await postsHandler(f.deps)(req("PATCH", `/posts/${POST_ID}`, { body: "編集" }));
+  await commentsHandler(f.deps)(req("PATCH", `/comments/${COMMENT_ID}`, { body: "編集" }));
+  assertEquals(f.calls.preflight, ["post", "comment", "edit", "edit"]);
+});
+
+Deno.test("外部API前の確認：上限・利用停止・プロフィール未登録は、外部APIを呼ばずに止める", async () => {
+  for (
+    const [rule, status, code] of [
+      ["RATE_LIMITED", 429, "RATE_LIMITED"],
+      ["REQUEST_LIMITED", 429, "RATE_LIMITED"],
+      ["RESTRICTED", 403, "FORBIDDEN"],
+      ["PROFILE_REQUIRED", 403, "FORBIDDEN"],
+    ] as const
+  ) {
+    for (
+      const call of [
+        (d: ReturnType<typeof makeFake>["deps"]) =>
+          postsHandler(d)(req("POST", "/posts", validPost)),
+        (d: ReturnType<typeof makeFake>["deps"]) =>
+          commentsHandler(d)(req("POST", "/comments", { post_id: POST_ID, body: "こんにちは" })),
+        (d: ReturnType<typeof makeFake>["deps"]) =>
+          postsHandler(d)(req("PATCH", `/posts/${POST_ID}`, { body: "編集" })),
+      ]
+    ) {
+      const f = makeFake({ preflightRule: rule });
+      const res = await call(f.deps);
+      assertEquals(res.status, status, rule);
+      assertEquals((await errorBody(res)).code, code, rule);
+      assertEquals(f.calls.moderated, [], `${rule}: 外部APIを呼んだ`);
+      assertEquals(f.calls.createPost.length + f.calls.createComment.length, 0);
+    }
+  }
+});
+
+Deno.test("外部API前の確認：利用者ごとのリクエスト上限は reason が request_limit。登録直後の上限と区別する", async () => {
+  const a = makeFake({ preflightRule: "REQUEST_LIMITED" });
+  const e = await errorBody(await postsHandler(a.deps)(req("POST", "/posts", validPost)));
+  assertEquals((e.details as { reason: string }).reason, "request_limit");
+  const b = makeFake({ preflightRule: "RATE_LIMITED" });
+  const e2 = await errorBody(await postsHandler(b.deps)(req("POST", "/posts", validPost)));
+  assertEquals((e2.details as { reason: string }).reason, "new_user_limit");
+});
+
+Deno.test("外部API前の確認：DBのエラーから、利用者ごとのリクエスト上限の解除日時だけを取り出す", () => {
+  const ok = toRuleError({
+    code: "P0001",
+    message: "REQUEST_LIMITED",
+    details: "2026-10-15 12:10:00+00",
+  });
+  assert(ok instanceof RuleError);
+  assertEquals(ok.code, "REQUEST_LIMITED");
+  assertEquals(ok.retryAt, "2026-10-15T12:10:00.000Z");
+});

@@ -8,12 +8,13 @@ import {
 } from "../http.ts";
 import { type AccountDeps, AccountRuleError } from "./types.ts";
 
-/** 退会に必要な、直近のログインの新しさ（決定済み：5分以内）。 */
+/** 退会に必要な、このセッションが作られてからの経過時間（決定済み：5分以内のログイン）。 */
 export const RECENT_LOGIN_MS = 5 * 60 * 1000;
 
 /**
  * POST /account-delete { "confirm": true }：退会（取消期間なし。即時に削除する）。
- * - 本人確認：直近5分以内にログインしていること（メール・Google・Appleで共通）。古いセッションでは拒否する。
+ * - 本人確認：**この操作に使うセッション**が5分以内に作られていること（メール・Google・Appleで共通）。
+ *   古いセッションは、本人が別の端末で再ログインしても通らない（盗まれたセッションでの退会を防ぐ）。
  * - 運営者として登録されている間は退会できない（先に登録を外す）。
  * - 画像を先に削除し、そのあとDBを1トランザクションで削除する。途中で失敗しても、同じ操作を再実行できる。
  */
@@ -24,7 +25,16 @@ export function accountDeleteHandler(deps: AccountDeps) {
     if (early) return early;
     if (req.method !== "POST") return methodNotAllowed();
 
-    const user = await deps.authenticate(req);
+    let user;
+    try {
+      user = await deps.authenticate(req);
+    } catch {
+      return errorResponse(
+        500,
+        "INTERNAL_ERROR",
+        "処理に失敗しました。しばらくしてからもう一度お試しください。",
+      );
+    }
     if (!user) return unauthenticated();
 
     const body = await readJsonObject(req);
@@ -34,7 +44,7 @@ export function accountDeleteHandler(deps: AccountDeps) {
       });
     }
 
-    const signedInAt = user.lastSignInAt ? Date.parse(user.lastSignInAt) : NaN;
+    const signedInAt = user.sessionStartedAt ? Date.parse(user.sessionStartedAt) : NaN;
     if (Number.isNaN(signedInAt) || now() - signedInAt > RECENT_LOGIN_MS) {
       return errorResponse(
         403,
