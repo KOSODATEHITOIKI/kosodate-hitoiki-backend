@@ -6,7 +6,7 @@
 
 kosodate-hitoiki（子育てのぐち・相談・コツや体験談を共有するSNS、Flutter製）のバックエンド。Supabase（DB・RLS・Edge Functions）を管理する。フロントエンドは別リポジトリ [kosodate-hitoiki](https://github.com/naka328/kosodate-hitoiki)。
 
-現状はDBスキーマ・RLS・DBテスト（Issue #10）、送信前チェックの共通モジュール（#11）、プロフィール系のEdge Functions（#12）、投稿・コメント・返信のAPI（#13）、ブロック・非表示・ミュートの取得への適用（#14）、共感・保存（#15）、投稿の検索（#16）、通報・運営の対処（#17）、登録直後の投稿頻度制限・新規登録の停止（#18）まで実装済み。通知・退会などは未実装（#19以降）。進捗の正は親Issue #6のチェックリスト。
+現状はDBスキーマ・RLS・DBテスト（Issue #10）、送信前チェックの共通モジュール（#11）、プロフィール系のEdge Functions（#12）、投稿・コメント・返信のAPI（#13）、ブロック・非表示・ミュートの取得への適用（#14）、共感・保存（#15）、投稿の検索（#16）、通報・運営の対処（#17）、登録直後の投稿頻度制限・新規登録の停止（#18）、通知・プッシュ配信の基盤（#19）まで実装済み。退会などは未実装（#20以降）。進捗の正は親Issue #6のチェックリスト。
 
 ## 一次情報と資料の優先順位
 
@@ -60,7 +60,7 @@ main                  ← リリース済みの状態のみ
 [スキーマ定義.md 10節](docs/スキーマ定義.md)で確定した方針。マイグレーション・RLSポリシーを追加・変更する際は必ず守る。
 
 - **送信前チェック対象のテーブル**（`profiles`のnickname/bio、`posts`、`comments`）には、認証済み利用者向けのINSERT/UPDATE/DELETE RLSポリシーを絶対に追加しない。書き込みはEdge Functions（`service_role`、RLSをバイパスする）経由のみに限定し、クライアントの直接書き込みで送信前チェックを迂回できる経路を作らない。`reports`・`moderation_actions`・`account_restrictions`・`nickname_reservations`・`app_settings`も同様。
-- 自由記述を伴わない単純な関係のトグル（`saved_posts`・`hidden_items`・`blocks`・`muted_topics`・`muted_words`・`notification_settings`・`push_devices`）は本人限定のRLSで直接操作を許可してよい。`reactions`は、ブロック・利用停止・非表示の確認を迂回させないため、書き込みをDB関数（service_role専用）に一本化している。
+- 自由記述を伴わない単純な関係のトグル（`saved_posts`・`hidden_items`・`blocks`・`muted_topics`・`muted_words`・`notification_settings`）は本人限定のRLSで直接操作を許可してよい。`push_devices`は、同じ端末を別の人が使い始めたときに前の持ち主宛ての通知が届かないよう、登録を`register_push_device`（持ち主を移す）に一本化し、直接のINSERT/UPDATEは許可しない（参照と削除は本人だけ）。`push_deliveries`（配信キュー）・`write_events`・`app_settings_history`は`service_role`専用。`reactions`は、ブロック・利用停止・非表示の確認を迂回させないため、書き込みをDB関数（service_role専用）に一本化している。
 - 件数のように「本人にだけ集計値を見せる」要件（共感件数、公開コメント件数）は、生のテーブルSELECTではなく`security definer`関数で提供する。RLSの行フィルタだけでは列単位・集計単位の制限を表現できないため。
 - 新しいテーブルを追加したら**必ず**`alter table ... enable row level security;`を書く。有効化を忘れると、Supabaseの自動生成APIで全件公開されてしまう。
 - 公開用ビュー（`public_profiles`のように本文以外だけを公開する用途）は`security_invoker`を付けない（オーナー権限で実行、RLSをバイパスして公開列だけを見せる）。逆に、既存のRLSに従わせたいビュー（`public_posts`）は`security_invoker = true`を付ける。用途を混同しない。
