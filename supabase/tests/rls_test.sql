@@ -128,9 +128,10 @@ SELECT is(
 
 RESET role;
 
--- === 運営者（authenticated、admin_users登録済み） ===
+-- === 運営者（authenticated、admin_users登録済み、二段階認証済み＝aal2） ===
 SET LOCAL role = 'authenticated';
-SET LOCAL request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000c';
+SET LOCAL request.jwt.claim.sub = '';
+SET LOCAL request.jwt.claims = '{"sub":"00000000-0000-0000-0000-00000000000c","aal":"aal2"}';
 
 SELECT is(
   (SELECT count(*)::int FROM public.profiles),

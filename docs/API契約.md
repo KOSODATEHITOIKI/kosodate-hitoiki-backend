@@ -330,17 +330,55 @@ Authorization: Bearer <token>
 { "target_type": "post", "target_id": "...", "reason": "personal_info", "detail": "" }
 ```
 
-同一通報者・同一対象の未対応通報が既にある場合は既存行をそのまま返す（重複作成しない、[スキーマ定義](スキーマ定義.md)6節の部分unique制約）。DB関数内で「異なる通報者3人到達」を判定し、到達時は対象の`hidden_at`を設定する。
+- `reason`は6種：`harassment`（誹謗中傷・攻撃的）・`personal_info`（名前や個人情報）・`spam`（勧誘・宣伝・スパム）・`copyright`（他人の文章や画像の転載）・`danger`（危険を感じる内容。自分や子どもを傷つけそうなど）・`other`（その他）。`detail`は任意で200文字まで（「その他」は一言添えられる）。
+- 成功は`201 { "id", "duplicate": false }`。**同じ人が同じ対象を通報し直した場合は、件数が増えず`200 { "id", "duplicate": true }`**（最初の理由は書き換えない）。同時に通報しても1件。
+- 通報できるのは、自分に見える投稿・コメントで、自分のものではないもの。存在しない・一時非表示・削除済みは、どれも`404 NOT_FOUND`（存在を知る手がかりにしない）。自分の投稿・コメントは`403`（`details.reason: "not_allowed"`）。利用停止中・プロフィール未登録は`403`（`restricted`・`profile_required`）。
+- **ブロック関係があっても通報はできる**（通報は運営へ届くもので、相手には届かない。権限表の記述を、安全のためこう解釈した。未決事項）。
+- 異なる3人の通報で、投稿・コメントが自動で一時非表示になる（同時に3人が通報しても取りこぼさない）。**再表示のあとに再び3人が通報しても、自動では再び非表示にならず**、運営の確認対象として残る。
+- **通報者の情報は、通報された側にもほかの利用者にも出ない**。通報（`reports`）を参照できるのは、通報した本人と運営者（二段階認証済み）だけ。
+- 通報は直接書き込めない（Edge Function経由のみ）。
 
-### 運営操作（運営者専用）
+### 一時非表示中の表示（本人へ「確認中」）
+
+```http
+GET /rest/v1/my_posts?select=*&order=created_at.desc&limit=20
+GET /rest/v1/member_comments?post_id=eq.<post_id>&select=*,under_review
+```
+
+- 一時非表示の投稿は、投稿者本人にだけ`my_posts`で`under_review: true`（確認中）として見える。ほかの人には、一覧・検索・詳細のどこにも出ない（投稿者本人にも、一覧・検索には出ない）。
+- 一時非表示のコメントも、投稿者本人にだけ`member_comments`で`under_review: true`として見える。
+
+### 運営の通報一覧（運営者専用）
+
+```http
+GET /rest/v1/admin_report_queue?select=*&order=is_hidden.desc,last_reported_at.desc
+Authorization: Bearer <二段階認証済みのトークン>
+```
+
+対象（投稿・コメント）ごとに、未対応の通報を`report_count`（通報者の数）・`reasons`・`first_reported_at`・`last_reported_at`・`is_hidden`・`target_owner_id`・`body`でまとめる。一時非表示中のものを先に並べるには、`is_hidden.desc`を指定する。**運営者（`admin_users`登録済み、かつ`aal2`）でなければ、0件が返る**。個別の通報（通報者のID・補足）は、`reports`テーブルを同じ条件で参照する。
+
+### 運営の対処（運営者専用）
 
 ```http
 POST /functions/v1/moderation/actions
-Authorization: Bearer <admin token>
+Authorization: Bearer <二段階認証済みのトークン>
 { "target_type": "post", "target_id": "...", "action": "unhide", "reason": "誤検知のため再表示" }
 ```
 
-`action=unhide`のとき、対象への未対応通報をまとめて`resolved_at`に更新する（[スキーマ定義](スキーマ定義.md)6節）。`action=suspend`のときは`account_restrictions`へ次段階の制限を作成する。二段階認証済みでないセッションは`FORBIDDEN`。
+| `action` | `target_type` | `reason` | 内容 |
+|---|---|---|---|
+| `unhide` | `post`・`comment` | 任意 | 一時非表示を解除し、対象の未対応の通報をまとめて対応済みにする。本人へは通知しない |
+| `delete` | `post`・`comment` | **必須** | 投稿は削除、コメントは本文が消えるソフト削除。未対応の通報は対応済みになる。**本人へ通知し、理由を読める** |
+| `warn` | `user` | **必須** | 警告（本人へ通知。理由を読める） |
+| `suspend` | `user` | **必須** | 利用停止（本人へ通知）。段階は、早期解除されていない過去の制限の件数で決まる：初回7日→再発30日→再発以降は無期限。**停止中の利用者のセッションを取り消す**（再ログインが必要。再ログインはできるが、書き込みは`restricted`で拒否される）。すでに停止中なら`409 CONFLICT`（段階を二重に進めない） |
+| `guide` | `user` | 任意 | 相談先の案内（本人へ通知）。「危険を感じる内容」の通報への対応に使う。案内の内容（電話・URL・文言）は未決定で、アプリ側のページで持つ |
+
+- 成功は`200 { "id", "action", "restriction_stage" }`（`restriction_stage`は`suspend`のときだけ）。
+- **運営者として登録されていない利用者には、この機能の存在を明かさない（`404`）。登録されていても、二段階認証（`aal2`）を済ませていないセッションは`403`（`details.reason: "mfa_required"`）**。運営者のIDはトークンから取り、リクエスト本文のIDは使わない。運営者自身には`warn`・`suspend`をかけられない（`403`）。
+- 警告・利用停止・相談先案内の対象は利用者（`user`）。通報一覧の`target_owner_id`を使う。
+- 本人へのお知らせは`notifications`（`notification_type: "moderation"`、`moderation_action_id`）で届き、対処の理由は`moderation_actions`から本人が読める（**通報者の情報は含まれない**）。
+- すべての対処は`moderation_actions`に記録される（誰が・いつ・何を・理由）。
+- 設定の手順・検証は[運営の二段階認証](運営の二段階認証.md)。
 
 ## 8. 通知
 

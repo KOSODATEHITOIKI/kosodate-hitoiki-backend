@@ -21,6 +21,8 @@ CASES=(
   "profile-avatar:PUT:UNAUTHENTICATED"
   "posts:POST:UNAUTHENTICATED"
   "comments:POST:UNAUTHENTICATED"
+  "reports:POST:UNAUTHENTICATED"
+  "moderation/actions:POST:UNAUTHENTICATED"
 )
 
 for c in "${CASES[@]}"; do

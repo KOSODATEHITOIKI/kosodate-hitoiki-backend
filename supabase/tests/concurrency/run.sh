@@ -248,4 +248,59 @@ delete from public.profiles where id in ('$G1','$G2');
 delete from auth.users where id in ('$G1','$G2');
 SQL
 
+# ---------------------------------------------------------------------------
+# 6. 通報：create_report 経由で、既存1件＋別の2人が同時に通報しても、3人到達で必ず一時非表示になる
+# ---------------------------------------------------------------------------
+H1=$(uuid 0x101); H2=$(uuid 0x102); H3=$(uuid 0x103); H4=$(uuid 0x104); HPOST=$(uuid 0xe4)
+psql_run <<SQL
+delete from public.reports where target_id = '$HPOST';
+delete from public.posts where id = '$HPOST';
+delete from public.profiles where id in ('$H1','$H2','$H3','$H4');
+insert into auth.users (id) values ('$H1'),('$H2'),('$H3'),('$H4') on conflict do nothing;
+insert into public.profiles (id, nickname) values ('$H1','RpOwner'),('$H2','RpA'),('$H3','RpB'),('$H4','RpC');
+insert into public.posts (id, author_id, post_type, body) values ('$HPOST','$H1','guchi','race');
+select public.create_report('$H2', 'post', '$HPOST', 'spam', null);
+SQL
+
+( psql_run <<SQL >/dev/null
+begin;
+select public.create_report('$H3', 'post', '$HPOST', 'spam', null);
+select pg_sleep(3);
+commit;
+SQL
+) &
+sleep 1
+psql_run <<SQL >/dev/null
+select public.create_report('$H4', 'post', '$HPOST', 'spam', null);
+SQL
+wait
+
+check "create_report 経由の同時通報でも、3人到達で一時非表示になる" "t"   "$(psql_run -c "select hidden_at is not null from public.posts where id='$HPOST'")"
+
+# 同じ人が同時に同じ対象を通報しても、1件のまま
+psql_run <<SQL >/dev/null
+update public.posts set hidden_at = null where id = '$HPOST';
+delete from public.reports where target_id = '$HPOST';
+SQL
+( psql_run <<SQL >/dev/null
+begin;
+select public.create_report('$H2', 'post', '$HPOST', 'spam', null);
+select pg_sleep(2);
+commit;
+SQL
+) &
+sleep 1
+psql_run <<SQL >/dev/null
+select public.create_report('$H2', 'post', '$HPOST', 'harassment', null);
+SQL
+wait
+check "同じ人が同時に同じ対象を通報しても、1件のまま" "1"   "$(psql_run -c "select count(*) from public.reports where target_id='$HPOST'")"
+
+psql_run <<SQL
+delete from public.reports where target_id = '$HPOST';
+delete from public.posts where id = '$HPOST';
+delete from public.profiles where id in ('$H1','$H2','$H3','$H4');
+delete from auth.users where id in ('$H1','$H2','$H3','$H4');
+SQL
+
 exit "$FAILED"
