@@ -42,6 +42,14 @@ function errorToResponse(e: unknown): Response {
     if (e.code === "NOT_FOUND") {
       return errorResponse(404, "NOT_FOUND", "プロフィールが見つかりません。");
     }
+    if (e.code === "SIGNUP_HALTED") {
+      return errorResponse(
+        429,
+        "RATE_LIMITED",
+        "現在、新規登録を一時的にお休みしています。しばらくしてからもう一度お試しください。",
+        { reason: "signup_halted" },
+      );
+    }
     // トリガーによる業務ルール違反（30日制限・旧名の予約）。
     if (e.code === "P0001") {
       return errorResponse(422, "VALIDATION_FAILED", e.hint ?? "入力内容を確認してください。");

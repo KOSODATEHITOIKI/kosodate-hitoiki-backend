@@ -380,6 +380,25 @@ Authorization: Bearer <二段階認証済みのトークン>
 - すべての対処は`moderation_actions`に記録される（誰が・いつ・何を・理由）。
 - 設定の手順・検証は[運営の二段階認証](運営の二段階認証.md)。
 
+### 運営設定（運営者専用）
+
+```http
+GET /functions/v1/moderation/settings
+PUT /functions/v1/moderation/settings
+Authorization: Bearer <二段階認証済みのトークン>
+{ "key": "new_signup_halted", "value": true }
+{ "key": "new_user_limit", "value": { "enabled": true, "window_hours": 24, "max_posts": 1, "max_comments": 3 } }
+```
+
+- `GET`は`200 { "settings": { "new_user_limit": ..., "new_signup_halted": ... } }`。`PUT`も更新後の`settings`を返す。
+- 変えられるキーは`new_user_limit`・`new_signup_halted`だけ（それ以外は`422`）。値の形・範囲の違反も`422`。変更の履歴（誰が・いつ・前の値・新しい値）が残る。
+- 認証の扱いは運営の対処と同じ：運営者でなければ`404`、`aal2`でなければ`403`（`mfa_required`）。
+
+### レート制限・新規登録停止のエラー
+
+- 登録直後の投稿・コメントが上限を超えると`429 RATE_LIMITED`（`details.reason: "new_user_limit"`、`details.retry_at`：制限が解ける日時）。再送（同じIdempotency-Key）は数えない。拒否された試行も数えない。
+- 新規登録の停止中、`profile-create`は新しいプロフィールを`429 RATE_LIMITED`（`details.reason: "signup_halted"`）で拒否する。アカウントの作成自体は、Authのフックが拒否する（メール・Google・Appleに共通。`429`、メッセージは「現在、新規登録を一時的にお休みしています」）。**既存の利用者のログインと、公開の閲覧は止めない**。
+
 ## 8. 通知
 
 ```http
@@ -397,7 +416,7 @@ POST  /rest/v1/push_devices                       { "platform": "ios", "device_t
 
 - 具体的な関数名・URLパス、OpenAPI／型定義生成の方式は#11〜#13で確定する。
 - 認証（サインアップ・ログイン・OAuth）のエンドポイントはSupabase Auth標準APIを利用し、本書では扱わない。
-- レート制限（`RATE_LIMITED`）の具体的な閾値は`app_settings`の値に従う。既定値は未決定（[未決事項](未決事項.md)）。
+- レート制限（`RATE_LIMITED`）の閾値は`app_settings`の値に従う（7節の設定API）。初期値は暫定（[未決事項](未決事項.md)）。
 - 日本語検索のクエリ形式は方式未確定のため、一覧APIの`q`パラメータ等は#16で追加する。
 
 ## 参照

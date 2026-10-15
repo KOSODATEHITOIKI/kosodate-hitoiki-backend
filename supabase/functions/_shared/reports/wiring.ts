@@ -1,5 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
-import { type ReportsDb, type ReportsDeps, toReportsError } from "./types.ts";
+import { type ReportsDb, type ReportsDeps, SETTING_KEYS, toReportsError } from "./types.ts";
 
 /** JWTの本体（payload）を読む。署名の検証は getUser で済ませたトークンにだけ使う。 */
 function readPayload(token: string): Record<string, unknown> {
@@ -48,6 +48,15 @@ export function createReportsDeps(): ReportsDeps {
         .eq("user_id", userId).maybeSingle();
       if (error) throw toReportsError(error);
       return data !== null;
+    },
+    getSettings: async () => {
+      const { data, error } = await admin.from("app_settings").select("key, value")
+        .in("key", [...SETTING_KEYS]);
+      if (error) throw toReportsError(error);
+      return Object.fromEntries((data ?? []).map((r) => [r.key, r.value]));
+    },
+    setSetting: async (adminId, key, value) => {
+      await rpc("set_app_setting", { p_admin_id: adminId, p_key: key, p_value: value });
     },
     applyModeration: (a) =>
       rpc("moderation_apply", {

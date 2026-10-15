@@ -255,6 +255,11 @@ Deno.test("結合：共感はAPI経由のみ（直接の書き込みは拒否）
 
 Deno.test("結合：検索はREST（RPC）経由で、未ログインでも使え、ブロック・ミュートを適用し、利用者IDを出さない", async () => {
   const owner = await signUp("srch-owner", "とうこうしゃ");
+  // 多数の投稿を作るため、登録直後の制限（#18）の対象外になるよう、登録日を過去にする。
+  await admin.from("profiles").update({
+    created_at: new Date(Date.now() - 48 * 3600e3).toISOString(),
+  })
+    .eq("id", owner.userId);
   const viewer = await signUp("srch-viewer", "えつらん");
   const anon = createClient(url, anonKey, { auth: { persistSession: false } });
   try {

@@ -5,6 +5,9 @@
 BEGIN;
 SELECT plan(51);
 
+-- この試験は投稿・コメントの機能を確かめる。登録直後の制限（#18）は rate_limit_test.sql で確かめるため、ここでは無効にする。
+UPDATE public.app_settings SET value = jsonb_set(value, '{enabled}', 'false') WHERE key = 'new_user_limit';
+
 INSERT INTO auth.users (id) VALUES
   ('00000000-0000-0000-0000-0000000000a1'), -- 投稿者
   ('00000000-0000-0000-0000-0000000000a2'), -- コメントする人

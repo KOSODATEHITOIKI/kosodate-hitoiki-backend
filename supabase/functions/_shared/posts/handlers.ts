@@ -55,6 +55,13 @@ function errorToResponse(e: unknown): Response {
         return errorResponse(403, "FORBIDDEN", "先にプロフィールを登録してください。", {
           reason: "profile_required",
         });
+      case "RATE_LIMITED":
+        return errorResponse(
+          429,
+          "RATE_LIMITED",
+          "登録したばかりのため、投稿・コメントの回数に上限があります。時間をおいてからお試しください。",
+          { reason: "new_user_limit", retry_at: e.retryAt },
+        );
       case "VALIDATION_FAILED":
         return errorResponse(
           422,

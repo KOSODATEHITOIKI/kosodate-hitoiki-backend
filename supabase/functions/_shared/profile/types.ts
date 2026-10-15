@@ -55,6 +55,7 @@ const KNOWN_RULE_MESSAGES = new Set([
 
 /** PostgRESTのエラーから、コードと利用者向けの文言だけを取り出す（生のメッセージは捨てる）。 */
 export function toDbError(e: { code?: string; message?: string }): DbError {
+  if (e.code === "P0001" && e.message === "SIGNUP_HALTED") return new DbError("SIGNUP_HALTED");
   const hint = e.code === "P0001" && e.message && KNOWN_RULE_MESSAGES.has(e.message)
     ? e.message
     : undefined;

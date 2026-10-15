@@ -1,5 +1,10 @@
 import { assert, assertEquals } from "@std/assert";
-import { isModerationActionsPath, moderationHandler, reportsHandler } from "./handlers.ts";
+import {
+  isModerationActionsPath,
+  isModerationSettingsPath,
+  moderationHandler,
+  reportsHandler,
+} from "./handlers.ts";
 import {
   type AuthContext,
   type ModerationAction,
@@ -15,6 +20,7 @@ interface Calls {
   reports: unknown[];
   moderation: unknown[];
   adminChecks: string[];
+  settings: { adminId: string; key: string; value: unknown }[];
 }
 
 function makeFake(options: {
@@ -24,7 +30,7 @@ function makeFake(options: {
   duplicate?: boolean;
   unexpected?: boolean;
 } = {}): { deps: ReportsDeps; calls: Calls } {
-  const calls: Calls = { reports: [], moderation: [], adminChecks: [] };
+  const calls: Calls = { reports: [], moderation: [], adminChecks: [], settings: [] };
   const maybeFail = () => {
     if (options.rule) throw new ReportsRuleError(options.rule);
     if (options.unexpected) throw new Error("boom with secret 本文");
@@ -43,6 +49,12 @@ function makeFake(options: {
       isRegisteredAdmin: (userId) => {
         calls.adminChecks.push(userId);
         return Promise.resolve(options.registeredAdmin ?? false);
+      },
+      getSettings: () => Promise.resolve({ new_signup_halted: false }),
+      setSetting: (adminId, key, value) => {
+        maybeFail();
+        calls.settings.push({ adminId, key, value });
+        return Promise.resolve();
       },
       applyModeration: (a) => {
         maybeFail();
@@ -271,4 +283,78 @@ Deno.test("運営：パス違い・メソッド違い", async () => {
   const f = makeFake({ auth: { userId: ADMIN, aal: "aal2" }, registeredAdmin: true });
   assertEquals((await moderationHandler(f.deps)(req("POST", "/moderation/other", {}))).status, 404);
   assertEquals((await moderationHandler(f.deps)(req("GET", "/moderation/actions"))).status, 405);
+});
+
+Deno.test("運営設定：パスの対応づけ", () => {
+  assertEquals(isModerationSettingsPath("/moderation/settings"), true);
+  assertEquals(isModerationSettingsPath("/functions/v1/moderation/settings/"), true);
+  assertEquals(isModerationSettingsPath("/moderation/settings/x"), false);
+});
+
+Deno.test("運営設定：未ログインは 401、運営者でなければ 404、二段階認証前は 403。どれも設定に触れない", async () => {
+  const body = { key: "new_signup_halted", value: true };
+  const anon = makeFake({ auth: null });
+  assertEquals(
+    (await moderationHandler(anon.deps)(req("PUT", "/moderation/settings", body))).status,
+    401,
+  );
+
+  const nonAdmin = makeFake({ auth: { userId: USER, aal: "aal2" }, registeredAdmin: false });
+  assertEquals(
+    (await moderationHandler(nonAdmin.deps)(req("PUT", "/moderation/settings", body))).status,
+    404,
+  );
+  assertEquals(
+    (await moderationHandler(nonAdmin.deps)(req("GET", "/moderation/settings"))).status,
+    404,
+  );
+
+  const aal1 = makeFake({ auth: { userId: ADMIN, aal: "aal1" }, registeredAdmin: true });
+  const res = await moderationHandler(aal1.deps)(req("PUT", "/moderation/settings", body));
+  assertEquals(res.status, 403);
+  assertEquals((await errorBody(res)).details, { reason: "mfa_required" });
+  assertEquals(
+    (await moderationHandler(aal1.deps)(req("GET", "/moderation/settings"))).status,
+    403,
+  );
+
+  for (const f of [anon, nonAdmin, aal1]) assertEquals(f.calls.settings.length, 0);
+});
+
+Deno.test("運営設定：二段階認証済みの運営者だけが読み書きできる。運営者のIDはトークンから取る", async () => {
+  const f = makeFake({ auth: { userId: ADMIN, aal: "aal2" }, registeredAdmin: true });
+  const got = await moderationHandler(f.deps)(req("GET", "/moderation/settings"));
+  assertEquals(got.status, 200);
+  assertEquals((await got.json()).settings, { new_signup_halted: false });
+
+  const put = await moderationHandler(f.deps)(
+    req("PUT", "/moderation/settings", { key: "new_signup_halted", value: true, admin_id: USER }),
+  );
+  assertEquals(put.status, 200);
+  assertEquals(f.calls.settings, [{ adminId: ADMIN, key: "new_signup_halted", value: true }]);
+});
+
+Deno.test("運営設定：未知のキー・キーや値の欠落は 422。DBの検証エラーも 422", async () => {
+  const auth = { userId: ADMIN, aal: "aal2" };
+  for (const body of [{ key: "other", value: 1 }, { value: true }, { key: "new_signup_halted" }]) {
+    const f = makeFake({ auth, registeredAdmin: true });
+    assertEquals(
+      (await moderationHandler(f.deps)(req("PUT", "/moderation/settings", body))).status,
+      422,
+    );
+    assertEquals(f.calls.settings.length, 0);
+  }
+  const f = makeFake({ auth, registeredAdmin: true, rule: "VALIDATION_FAILED" });
+  assertEquals(
+    (await moderationHandler(f.deps)(
+      req("PUT", "/moderation/settings", { key: "new_user_limit", value: { enabled: "x" } }),
+    )).status,
+    422,
+  );
+  assertEquals(
+    (await moderationHandler(makeFake({ auth, registeredAdmin: true }).deps)(
+      req("POST", "/moderation/settings", {}),
+    )).status,
+    405,
+  );
 });
