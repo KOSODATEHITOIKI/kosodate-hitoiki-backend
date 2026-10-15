@@ -164,6 +164,8 @@ Deno.test("配線：登録→ニックネーム変更→更新→画像→削除
     );
   } finally {
     await admin.auth.admin.deleteUser(userId);
+    // 旧名の予約は、利用者を削除しても30日間残る（仕様）。再実行できるよう、このテストの分を消す。
+    await admin.from("nickname_reservations").delete().eq("previous_owner_id", userId);
   }
 });
 
@@ -191,5 +193,9 @@ Deno.test("配線：同じ名前を他の人が使っていると登録できな
   } finally {
     await admin.auth.admin.deleteUser(a.userId);
     await admin.auth.admin.deleteUser(b.userId);
+    await admin.from("nickname_reservations").delete().in("previous_owner_id", [
+      a.userId,
+      b.userId,
+    ]);
   }
 });

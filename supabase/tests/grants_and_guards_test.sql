@@ -3,7 +3,7 @@
 -- admin_usersのポリシーが再帰しないこと、一時非表示投稿のコメント・共感が制限されることを確認する。
 
 BEGIN;
-SELECT plan(10);
+SELECT plan(12);
 
 INSERT INTO auth.users (id) VALUES
   ('00000000-0000-0000-0000-00000000000a'), -- user_a（投稿者）
@@ -103,14 +103,35 @@ SELECT throws_ok(
 
 RESET role;
 
--- === 運営者（authenticated） ===
+-- === 運営者（二段階認証前：aal1） ===
+-- admin_usersに登録されていても、二段階認証を済ませていないセッションは運営者として扱わない。
 SET LOCAL role = 'authenticated';
-SET LOCAL request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000c';
+SET LOCAL request.jwt.claim.sub = '';
+SET LOCAL request.jwt.claims = '{"sub":"00000000-0000-0000-0000-00000000000c","aal":"aal1"}';
+
+SELECT is(
+  public.is_admin(),
+  false,
+  '二段階認証前（aal1）のセッションは、admin_usersに登録されていても運営者として扱われない'
+);
+
+SELECT is(
+  (SELECT count(*)::int FROM public.admin_users WHERE user_id <> auth.uid()),
+  0,
+  '二段階認証前のセッションは、他の運営者の登録を参照できない'
+);
+
+RESET role;
+
+-- === 運営者（二段階認証済み：aal2） ===
+SET LOCAL role = 'authenticated';
+SET LOCAL request.jwt.claim.sub = '';
+SET LOCAL request.jwt.claims = '{"sub":"00000000-0000-0000-0000-00000000000c","aal":"aal2"}';
 
 SELECT is(
   (SELECT count(*)::int FROM public.admin_users),
   1,
-  '運営者は admin_users を参照できる'
+  '運営者（二段階認証済み）は admin_users を参照できる'
 );
 
 RESET role;
