@@ -13,9 +13,9 @@ on:
   push:
     branches: [develop]
     paths:
-      - 'scripts/ops/**'
-      - '.github/workflows/backup.yml'
-      - 'supabase/migrations/**'
+      - "scripts/ops/**"
+      - ".github/workflows/backup.yml"
+      - "supabase/migrations/**"
   schedule:
     - cron: "17 17 * * *" # 毎日 02:17（日本時間）
   workflow_dispatch:

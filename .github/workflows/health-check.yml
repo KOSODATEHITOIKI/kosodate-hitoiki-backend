@@ -11,8 +11,8 @@ on:
   push:
     branches: [develop]
     paths:
-      - 'scripts/ops/**'
-      - '.github/workflows/health-check.yml'
+      - "scripts/ops/**"
+      - ".github/workflows/health-check.yml"
   schedule:
     - cron: "37 21 * * *" # 毎日 06:37（日本時間）
   workflow_dispatch:

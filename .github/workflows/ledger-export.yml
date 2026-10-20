@@ -11,8 +11,8 @@ on:
   push:
     branches: [develop]
     paths:
-      - 'scripts/ops/**'
-      - '.github/workflows/ledger-export.yml'
+      - "scripts/ops/**"
+      - ".github/workflows/ledger-export.yml"
   schedule:
     - cron: "7 * * * *"
   workflow_dispatch:
