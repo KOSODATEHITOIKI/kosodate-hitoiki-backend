@@ -85,6 +85,7 @@ npm run functions:test       # Edge FunctionsのDenoテスト
 npm run test:functions-integration  # Functionsの配線の結合テスト（要 supabase start）
 npm run test:functions-smoke        # Edge Runtime上で全Functionが読み込めるかの確認（要 supabase start）
 bash infra/portable/run.sh          # Supabaseなしの素のPostgres 17で、全マイグレーションとpgTAPを通す（AWS移行の段階1、要 Docker）
+bash infra/portable/rest.sh         # PostgREST越しに、実際のHTTPで権限（未ログイン・本人・運営者・不正なトークン）を確かめる（AWS移行の段階2、要 Docker）
 bash scripts/ops/verify-local.sh    # バックアップ→削除→復元→台帳で再削除、を通しで確かめる（要 supabase start。ローカルのDBを置き換える）
 API_URL=… ANON_KEY=… bash scripts/ops/check-exposure.sh   # 動いている環境の公開範囲を、未ログインの鍵だけで確かめる
 ```

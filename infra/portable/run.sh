@@ -3,6 +3,7 @@
 #
 #   bash infra/portable/run.sh            # 全マイグレーションを適用し、pgTAPを実行
 #   KEEP=1 bash infra/portable/run.sh     # 終わってもコンテナを残す（調査用）
+#   SKIP_TESTS=1 …                        # マイグレーションまで適用して、pgTAPは実行しない
 #
 # 前提：Docker。イメージは初回に自動で作る。ローカル専用（本番・クラウドには向けない）。
 set -uo pipefail
@@ -46,6 +47,9 @@ done
 [ "$FAILED_MIG" = 0 ] || { echo "マイグレーションの適用に失敗しました"; exit 1; }
 
 if [ -f supabase/seed.sql ]; then psql_in < supabase/seed.sql >/dev/null || echo "FAIL - seed"; fi
+
+# SKIP_TESTS=1：DBの準備だけをして終わる（rest.sh などが、準備済みのDBを使うため）
+[ "${SKIP_TESTS:-}" = 1 ] && exit 0
 
 echo "== pgTAP =="
 MSYS_NO_PATHCONV=1 docker cp supabase/tests "$NAME:/tests" >/dev/null

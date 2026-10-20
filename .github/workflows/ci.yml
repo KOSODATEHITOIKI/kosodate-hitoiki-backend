@@ -47,6 +47,9 @@ jobs:
           persist-credentials: false
       - name: Run migrations and pgTAP on plain Postgres 17
         run: bash infra/portable/run.sh
+      # 段階2：PostgREST（AWSではFargateで動かすAPI層）越しに、実際のHTTPで権限が守られていることを確かめる
+      - name: Check permissions over HTTP through PostgREST
+        run: bash infra/portable/rest.sh
 
   db-tests:
     name: Database (migrations and RLS)
