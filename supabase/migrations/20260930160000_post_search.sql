@@ -10,9 +10,16 @@
 -- この移行の間だけsearch_pathにextensionsを含める。
 set local search_path = public, extensions;
 
-create extension if not exists pgroonga with schema extensions;
-
-create index posts_body_pgroonga on public.posts using pgroonga (body);
+-- PGroongaが使える環境（Supabase）でだけ、拡張とインデックスを作る。使えない環境（RDSなど）では、
+-- 検索は索引なしの代替になる（AWS移行の段階5で、pg_bigmの索引に置き換える。docs/AWS移行設計案.md）。
+do $$
+begin
+  if exists (select 1 from pg_available_extensions where name = 'pgroonga') then
+    create extension if not exists pgroonga with schema extensions;
+    create index posts_body_pgroonga on public.posts using pgroonga (body);
+  end if;
+end
+$$;
 
 -- 検索・一覧。未ログイン（auth.uid()がnull）は公開投稿のみ。ログイン済みは、個人の非表示・ブロック・
 -- 話題／言葉のミュートを適用する（feed_postsと同じ）。コメントの本文は検索対象に含めない。
@@ -53,6 +60,7 @@ declare
   n integer;
   i integer;
   max_rows integer := least(greatest(coalesce(p_limit, 20), 1), 50);
+  use_pgroonga boolean := exists (select 1 from pg_extension where extname = 'pgroonga');
 begin
   if p_post_type is not null and p_post_type not in ('guchi', 'soudan', 'kotsu') then
     raise exception 'VALIDATION_FAILED' using errcode = 'P0001';
@@ -92,7 +100,12 @@ begin
   $q$;
 
   for i in 1..n loop
-    sql := sql || format(' and p.body operator(extensions.&@) $%s', 5 + i);
+    if use_pgroonga then
+      sql := sql || format(' and p.body operator(extensions.&@) $%s', 5 + i);
+    else
+      -- 代替（索引なし）：NFKC正規化・大文字小文字を無視した部分一致。PGroongaの&@と同じ意味に揃える。
+      sql := sql || format(' and position(lower(normalize($%s, nfkc)) in lower(normalize(p.body, nfkc))) > 0', 5 + i);
+    end if;
   end loop;
 
   if viewer is not null then

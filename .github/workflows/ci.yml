@@ -34,6 +34,20 @@ jobs:
       - name: Check Markdown and configuration
         run: npm run check
 
+  # AWS移行の段階1：Supabaseなしの素のPostgres 17で、全マイグレーションとpgTAPが通ることを保つ。
+  # マイグレーションがSupabase固有の機能に依存し直さないための検証（docs/AWS移行設計案.md）。
+  portable-postgres:
+    name: Portable Postgres (no Supabase)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Run migrations and pgTAP on plain Postgres 17
+        run: bash infra/portable/run.sh
+
   db-tests:
     name: Database (migrations and RLS)
     runs-on: ubuntu-latest
