@@ -6,7 +6,9 @@ const SECRET = "job-secret-for-test";
 function make(secret: string | undefined = SECRET) {
   const calls: number[] = [];
   const handler = storageCleanupHandler({
-    jobSecret: secret,
+    // 本番では、DB（Vault）に問い合わせる。ここでは、登録されている秘密と一致するかで代用する。
+    verifyJobSecret: (given) =>
+      Promise.resolve(secret !== undefined && secret !== "" && given === secret),
     drain: (limit) => {
       calls.push(limit);
       return Promise.resolve(3);

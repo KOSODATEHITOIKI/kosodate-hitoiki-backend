@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
+import { createJobSecretVerifier } from "../job_secret_wiring.ts";
 import { createFcmSender, parseServiceAccount } from "./fcm.ts";
 import type { PushDb, PushDeps, PushJob, PushSender } from "./types.ts";
 
@@ -40,7 +41,7 @@ export function createPushDeps(): PushDeps {
   return {
     db,
     sender: account ? createFcmSender(account) : unconfigured,
-    dispatchSecret: Deno.env.get("INTERNAL_JOB_SECRET"),
+    verifyJobSecret: createJobSecretVerifier(),
     senderConfigured: account !== null,
   };
 }

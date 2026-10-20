@@ -1,3 +1,5 @@
+import type { JobSecretVerifier } from "../internal_auth.ts";
+
 /** プッシュの配信（FCM）。DBの配信キュー（push_deliveries）を取り出して送る。 */
 export type PushOutcome = "sent" | "retry" | "invalid_token";
 
@@ -23,8 +25,8 @@ export interface PushSender {
 export interface PushDeps {
   db: PushDb;
   sender: PushSender;
-  /** 配信を起動できる側と共有する秘密。未設定なら、誰も起動できない。 */
-  dispatchSecret: string | undefined;
+  /** 受け取った秘密が正しいかを、DB（Vault）に問い合わせて確かめる。未登録なら、誰も起動できない。 */
+  verifyJobSecret: JobSecretVerifier;
   /** FCMの認証情報が設定されているか。 */
   senderConfigured: boolean;
 }

@@ -25,7 +25,12 @@ function makeDeps(opts: {
 } = {}) {
   const calls = { claim: 0, finish: [] as unknown[][], sent: [] as PushJob[] };
   const deps: PushDeps = {
-    dispatchSecret: "secret" in opts ? opts.secret : SECRET,
+    // 本番では、DB（Vault）に問い合わせる。ここでは、登録されている秘密（SECRET）と一致するかで代用する。
+    verifyJobSecret: (given) =>
+      Promise.resolve(
+        ("secret" in opts ? opts.secret : SECRET) !== undefined &&
+          given === ("secret" in opts ? opts.secret : SECRET),
+      ),
     senderConfigured: opts.configured ?? true,
     db: {
       claim: () => {

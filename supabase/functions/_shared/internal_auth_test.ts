@@ -17,36 +17,46 @@ async function withCapturedErrors<T>(fn: () => Promise<T>): Promise<{ result: T;
 
 const SECRET = "a".repeat(32) + "b".repeat(32); // テスト用の使い捨ての値
 
-Deno.test("内部ジョブの秘密：一致したときだけ通る。ログは出さない", async () => {
-  const { result, logs } = await withCapturedErrors(() => jobSecretMatches(SECRET, SECRET));
+Deno.test("内部ジョブの秘密：DB（Vault）が「正しい」と答えたときだけ通る。ログは出さない", async () => {
+  const { result, logs } = await withCapturedErrors(() =>
+    jobSecretMatches(SECRET, (g) => Promise.resolve(g === SECRET))
+  );
   assertEquals(result, true);
   assertEquals(logs, []);
 });
 
-Deno.test("内部ジョブの秘密：関数側が未設定なら拒否し、理由（未設定）をログに残す", async () => {
-  for (const expected of [undefined, ""]) {
-    const { result, logs } = await withCapturedErrors(() => jobSecretMatches(SECRET, expected));
-    assertEquals(result, false);
-    assertEquals(logs.length, 1);
-    assert(logs[0].includes("not set"), logs[0]);
-    assert(!logs[0].includes(SECRET), "ログに秘密の値が出ている");
-  }
-});
-
-Deno.test("内部ジョブの秘密：値が違えば拒否し、文字数だけをログに残す（値は出さない）", async () => {
-  const wrong = SECRET + "\n"; // 末尾に改行が混入した場合
-  const { result, logs } = await withCapturedErrors(() => jobSecretMatches(wrong, SECRET));
+Deno.test("内部ジョブの秘密：DBが「違う」（または未登録）と答えたら拒否し、文字数だけをログに残す", async () => {
+  const { result, logs } = await withCapturedErrors(() =>
+    jobSecretMatches(SECRET + "\n", () => Promise.resolve(false))
+  );
   assertEquals(result, false);
   assertEquals(logs.length, 1);
-  assert(logs[0].includes("given_length=65") && logs[0].includes("expected_length=64"), logs[0]);
+  assert(logs[0].includes("given_length=65"), logs[0]);
   assert(!logs[0].includes(SECRET), "ログに秘密の値が出ている");
   assert(!logs[0].includes("aaaa"), "ログに秘密の一部が出ている");
 });
 
-Deno.test("内部ジョブの秘密：ヘッダーがない呼び出しは拒否するが、ログは出さない（無関係なアクセス）", async () => {
+Deno.test("内部ジョブの秘密：ヘッダーがない呼び出しは、DBに問い合わせず、ログも出さない", async () => {
+  let asked = 0;
   for (const given of [null, ""]) {
-    const { result, logs } = await withCapturedErrors(() => jobSecretMatches(given, SECRET));
+    const { result, logs } = await withCapturedErrors(() =>
+      jobSecretMatches(given, () => {
+        asked++;
+        return Promise.resolve(true);
+      })
+    );
     assertEquals(result, false);
     assertEquals(logs, []);
   }
+  assertEquals(asked, 0);
+});
+
+Deno.test("内部ジョブの秘密：DBに問い合わせられなかったら、安全側（拒否）に倒す。理由はログに残す", async () => {
+  const { result, logs } = await withCapturedErrors(() =>
+    jobSecretMatches(SECRET, () => Promise.reject(new Error("db down with secret " + SECRET)))
+  );
+  assertEquals(result, false);
+  assertEquals(logs.length, 1);
+  assert(logs[0].includes("could not reach the database"), logs[0]);
+  assert(!logs[0].includes(SECRET), "ログに秘密の値が出ている");
 });
