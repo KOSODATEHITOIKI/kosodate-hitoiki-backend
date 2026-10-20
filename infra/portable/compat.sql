@@ -16,6 +16,8 @@ begin
   if not exists (select 1 from pg_roles where rolname = 'service_role') then
     create role service_role nologin noinherit bypassrls;
   end if;
+  -- APIの接続ロール（PostgRESTが使う。権限を持たず、リクエストごとに anon／authenticated へ切り替わる）は、
+  -- パスワードを環境ごとに別に設定する必要があるため、ここでは作らない（infra/portable/rest.sh、本番はSecrets Manager）。
   -- Supabase Authの内部ロール。AWSでは使わないが、マイグレーションが権限を付ける箇所があるため置く
   -- （移行が進んだら、マイグレーション側から外す）。
   if not exists (select 1 from pg_roles where rolname = 'supabase_auth_admin') then
