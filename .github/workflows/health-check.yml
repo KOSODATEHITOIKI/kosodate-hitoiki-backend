@@ -1,0 +1,98 @@
+name: Health check
+
+# 毎日、運用の健康診断をする：①しきい値（容量・未対応の通報・削除ジョブの停止など）②公開範囲を実際のAPIで確認
+# ③バックアップ・台帳の書き出しが止まっていないか。異常があれば失敗し、GitHubからメールが届く。
+# 項目・しきい値・担当は docs/運用手順.md。
+# 有効にするのは、リポジトリの Variables で BACKUP_DEV_ENABLED / BACKUP_PROD_ENABLED を "true" にしたときだけ。
+
+on:
+  schedule:
+    - cron: "37 21 * * *" # 毎日 06:37（日本時間）
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # どの環境を対象にするかを決める（Variablesで有効にした環境だけ）。ジョブの if では matrix が使えないため、
+  # ここで組み立てた結果を、次のジョブの matrix に渡す。
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+      count: ${{ steps.m.outputs.count }}
+    steps:
+      - id: m
+        env:
+          DEV_ENABLED: ${{ vars.BACKUP_DEV_ENABLED }}
+          PROD_ENABLED: ${{ vars.BACKUP_PROD_ENABLED }}
+          TARGET: ${{ 'all' }}
+        run: |
+          set -euo pipefail
+          items=()
+          if [ "$DEV_ENABLED" = "true" ] && { [ "$TARGET" = "all" ] || [ "$TARGET" = "development" ]; }; then
+            items+=('{"target":"development","environment":"backup-development","expect_email_confirm":""}')
+          fi
+          if [ "$PROD_ENABLED" = "true" ] && { [ "$TARGET" = "all" ] || [ "$TARGET" = "production" ]; }; then
+            items+=('{"target":"production","environment":"backup-production","expect_email_confirm":"1"}')
+          fi
+          json=$(IFS=,; echo "${items[*]:-}")
+          echo "matrix={\"include\":[$json]}" >> "$GITHUB_OUTPUT"
+          echo "count=${#items[@]}" >> "$GITHUB_OUTPUT"
+          echo "対象の環境：${#items[@]}件"
+
+  check:
+    name: Health check (${{ matrix.target }})
+    needs: plan
+    if: ${{ needs.plan.outputs.count != '0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: ${{ matrix.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Thresholds (database, jobs, reports)
+        env:
+          SRC_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+        run: bash scripts/ops/health-check.sh
+      # 公開鍵（anon）だけで問い合わせる。特権キーは使わない。
+      - name: Exposure check against the running API
+        env:
+          API_URL: ${{ vars.SUPABASE_URL }}
+          ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+          EXPECT_EMAIL_CONFIRM: ${{ matrix.expect_email_confirm }}
+        run: bash scripts/ops/check-exposure.sh
+      - name: Configure AWS credentials (OIDC, temporary)
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ vars.AWS_BACKUP_ROLE_ARN }}
+          aws-region: ap-northeast-1
+      - name: Backups and ledger are fresh
+        env:
+          BUCKET: ${{ vars.BACKUP_BUCKET }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          now=$(date -u +%s)
+          fresh() { # fresh <prefix> <許容する秒数> <説明>
+            last=$(aws s3api list-objects-v2 --bucket "$BUCKET" --prefix "$1" \
+              --query 'sort_by(Contents,&LastModified)[-1].LastModified' --output text 2>/dev/null || echo None)
+            if [ "$last" = "None" ] || [ -z "$last" ]; then echo "FAIL - $3：1件もありません" >&2; return 1; fi
+            age=$(( now - $(date -u -d "$last" +%s) ))
+            if [ "$age" -gt "$2" ]; then echo "FAIL - $3：最新が $((age/3600)) 時間前（許容 $(($2/3600)) 時間）" >&2; return 1; fi
+            echo "ok   - $3：最新は $((age/3600)) 時間前"
+          }
+          status=0
+          fresh "backups/${TARGET}/" 129600 "バックアップ" || status=1   # 36時間
+          fresh "ledger/${TARGET}/" 10800 "台帳の書き出し" || status=1    # 3時間
+          exit $status

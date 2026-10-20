@@ -1,0 +1,164 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  kosodate-hitoiki バックアップの保管先（非公開のS3バケット）と、GitHub Actions から書き込むための最小権限のIAMロール。
+  docs/運用手順.md の手順で、AWSコンソールの CloudFormation から作成する（パスワードやアクセスキーは使わない）。
+
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues: [development, production]
+    Description: どの環境のバックアップか（development または production）
+  GitHubRepository:
+    Type: String
+    Default: nakayu206/kosodate-hitoiki-backend
+    Description: バックアップを書き込めるGitHubリポジトリ（owner/repo）
+  GitHubEnvironment:
+    Type: String
+    Description: >-
+      書き込みを許す GitHub Environment の名前（例：backup-production）。
+      このEnvironmentで動くジョブだけが、ロールを引き受けられる。
+  CreateGitHubOidcProvider:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: >-
+      GitHub の OIDC プロバイダーを新しく作るか。アカウントに1つしか作れないため、
+      すでにある場合（ほかのスタックで作成済み）は false にする。
+  RetentionDays:
+    Type: Number
+    Default: 30
+    MinValue: 7
+    MaxValue: 90
+    Description: バックアップの保持日数（決定済み：30日）
+
+Conditions:
+  CreateProvider: !Equals [!Ref CreateGitHubOidcProvider, "true"]
+
+Resources:
+  BackupBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub kosodate-hitoiki-backups-${Environment}-${AWS::AccountId}
+      # 非公開：公開設定をすべて禁止する
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+            BucketKeyEnabled: true
+      # 誤って・不正に消されても戻せるように、また Object Lock のために、バージョニングを有効にする
+      VersioningConfiguration:
+        Status: Enabled
+      # Object Lock：保持期間の間は、書き込んだ人（ロール）を含め、誰も削除・上書きできない（ガバナンスモード）。
+      # バックアップの暗号化が破られなくても、削除されて復旧できなくなる事故（誤操作・乗っ取り）を防ぐ。
+      ObjectLockEnabled: true
+      ObjectLockConfiguration:
+        ObjectLockEnabled: Enabled
+        Rule:
+          DefaultRetention:
+            Mode: GOVERNANCE
+            Days: !Ref RetentionDays
+      LifecycleConfiguration:
+        Rules:
+          # 保持期間（＋1日）を過ぎたものを自動で削除する。削除済みのデータが、バックアップに
+          # 無期限に残らないようにする（決定済み：バックアップは30日）。
+          - Id: expire-backups
+            Status: Enabled
+            ExpirationInDays: !Ref RetentionDays
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 1
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+          - Id: expire-delete-markers
+            Status: Enabled
+            ExpiredObjectDeleteMarker: true
+
+  # 暗号化されていない通信（HTTP）でのアクセスを拒否する
+  BackupBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref BackupBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt BackupBucket.Arn
+              - !Sub ${BackupBucket.Arn}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: CreateProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+
+  # GitHub Actions が引き受けるロール。長期のアクセスキーは作らない（一時的な権限だけ）。
+  # 引き受けられるのは、指定したリポジトリの、指定した Environment で動くジョブだけ。
+  GitHubBackupRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub kosodate-hitoiki-backup-writer-${Environment}
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !If
+                - CreateProvider
+                - !Ref GitHubOidcProvider
+                - !Sub arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubRepository}:environment:${GitHubEnvironment}
+      Policies:
+        - PolicyName: write-backups-only
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # 書き込みだけ。読み取り・削除・上書きはできない（バックアップの中身を、このロールからは読めない）。
+              - Sid: WriteBackupObjects
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource:
+                  - !Sub ${BackupBucket.Arn}/backups/${Environment}/*
+                  - !Sub ${BackupBucket.Arn}/ledger/${Environment}/*
+              # 鮮度の確認（最新のバックアップの時刻）のため、一覧だけ許す。
+              - Sid: ListBackupObjects
+                Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: !GetAtt BackupBucket.Arn
+                Condition:
+                  StringLike:
+                    s3:prefix:
+                      - !Sub backups/${Environment}/*
+                      - !Sub ledger/${Environment}/*
+
+Outputs:
+  BackupBucketName:
+    Description: バックアップのバケット名（GitHub の Variables に BACKUP_BUCKET として登録する）
+    Value: !Ref BackupBucket
+  BackupRoleArn:
+    Description: GitHub Actions が引き受けるロールのARN（GitHub の Variables に AWS_BACKUP_ROLE_ARN として登録する）
+    Value: !GetAtt GitHubBackupRole.Arn

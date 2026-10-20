@@ -6,7 +6,7 @@
 
 kosodate-hitoiki（子育てのぐち・相談・コツや体験談を共有するSNS、Flutter製）のバックエンド。Supabase（DB・RLS・Edge Functions）を管理する。フロントエンドは別リポジトリ [kosodate-hitoiki](https://github.com/naka328/kosodate-hitoiki)。
 
-現状はDBスキーマ・RLS・DBテスト（Issue #10）、送信前チェックの共通モジュール（#11）、プロフィール系のEdge Functions（#12）、投稿・コメント・返信のAPI（#13）、ブロック・非表示・ミュートの取得への適用（#14）、共感・保存（#15）、投稿の検索（#16）、通報・運営の対処（#17）、登録直後の投稿頻度制限・新規登録の停止（#18）、通知・プッシュ配信の基盤（#19）、退会・保持期限の削除（#20）まで実装済み。バックアップ・運用などは未実装（#21以降）。進捗の正は親Issue #6のチェックリスト。
+現状はDBスキーマ・RLS・DBテスト（Issue #10）、送信前チェックの共通モジュール（#11）、プロフィール系のEdge Functions（#12）、投稿・コメント・返信のAPI（#13）、ブロック・非表示・ミュートの取得への適用（#14）、共感・保存（#15）、投稿の検索（#16）、通報・運営の対処（#17）、登録直後の投稿頻度制限・新規登録の停止（#18）、通知・プッシュ配信の基盤（#19）、退会・保持期限の削除（#20）まで実装済み。バックアップ・復旧・監視（#21）は実装済み（クラウドでの初期設定と復元試験は手作業が残る）。Flutter連携（#22）は未着手。進捗の正は親Issue #6のチェックリスト。
 
 ## 一次情報と資料の優先順位
 
@@ -26,6 +26,7 @@ kosodate-hitoiki（子育てのぐち・相談・コツや体験談を共有す�
 | [検索方式の実測](docs/検索方式の実測.md) | 日本語検索の方式（PGroonga）を実測して選んだ記録 |
 | [運営の二段階認証](docs/運営の二段階認証.md) | 運営者を二段階認証（TOTP）で守る仕組みと、管理者の手作業 |
 | [退会とデータの保持](docs/退会とデータの保持.md) | 退会で消えるもの・残るもの、保持期限、残存データの一覧 |
+| [運用手順](docs/運用手順.md) | 環境・秘密情報、デプロイと復旧、バックアップ・復元、監視と担当、リリース前の必須確認 |
 | [AWS移行設計案](docs/AWS移行設計案.md) | SupabaseからAWS全体へ移す設計案（構成、互換層、段階、リスク。採用は未確定） |
 | [権限表](docs/権限表.md) | 未ログイン／本人／他人／運営者の権限マトリクス |
 | [API契約](docs/API契約.md) | リクエスト／レスポンス例、エラー、ページング |
@@ -84,6 +85,8 @@ npm run functions:test       # Edge FunctionsのDenoテスト
 npm run test:functions-integration  # Functionsの配線の結合テスト（要 supabase start）
 npm run test:functions-smoke        # Edge Runtime上で全Functionが読み込めるかの確認（要 supabase start）
 bash infra/portable/run.sh          # Supabaseなしの素のPostgres 17で、全マイグレーションとpgTAPを通す（AWS移行の段階1、要 Docker）
+bash scripts/ops/verify-local.sh    # バックアップ→削除→復元→台帳で再削除、を通しで確かめる（要 supabase start。ローカルのDBを置き換える）
+API_URL=… ANON_KEY=… bash scripts/ops/check-exposure.sh   # 動いている環境の公開範囲を、未ログインの鍵だけで確かめる
 ```
 
 マイグレーションを追加・変更したら、必ず`npx supabase db reset`と`npx supabase test db`をローカルで実行してから push する。CIの`Database (migrations and RLS)`ジョブでも同じ検証が走る。
