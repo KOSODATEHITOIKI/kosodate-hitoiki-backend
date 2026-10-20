@@ -6,6 +6,13 @@ name: Ledger export
 # 有効にするのは、リポジトリの Variables で BACKUP_DEV_ENABLED / BACKUP_PROD_ENABLED を "true" にしたときだけ。
 
 on:
+  # 初回リリースまでは main にこのファイルがなく、手動・スケジュール実行ができない。そのため、devに対してだけ、
+  # バックアップ関連のファイルを develop に取り込んだときにも実行する（本番には実行しない）。
+  push:
+    branches: [develop]
+    paths:
+      - 'scripts/ops/**'
+      - '.github/workflows/ledger-export.yml'
   schedule:
     - cron: "7 * * * *"
   workflow_dispatch:
@@ -32,7 +39,7 @@ jobs:
         env:
           DEV_ENABLED: ${{ vars.BACKUP_DEV_ENABLED }}
           PROD_ENABLED: ${{ vars.BACKUP_PROD_ENABLED }}
-          TARGET: ${{ 'all' }}
+          TARGET: ${{ github.event_name == 'push' && 'development' || 'all' }}
         run: |
           set -euo pipefail
           items=()

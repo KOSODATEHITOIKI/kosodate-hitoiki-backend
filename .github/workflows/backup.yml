@@ -8,6 +8,14 @@ name: Backup
 # 注意：スケジュール実行は、デフォルトブランチ（main）のこのファイルで動く（初回リリースまでは手動実行のみ）。
 
 on:
+  # 初回リリースまでは main にこのファイルがなく、手動・スケジュール実行ができない。そのため、devに対してだけ、
+  # バックアップ関連のファイルを develop に取り込んだときにも実行する（本番には実行しない）。
+  push:
+    branches: [develop]
+    paths:
+      - 'scripts/ops/**'
+      - '.github/workflows/backup.yml'
+      - 'supabase/migrations/**'
   schedule:
     - cron: "17 17 * * *" # 毎日 02:17（日本時間）
   workflow_dispatch:
@@ -40,7 +48,7 @@ jobs:
         env:
           DEV_ENABLED: ${{ vars.BACKUP_DEV_ENABLED }}
           PROD_ENABLED: ${{ vars.BACKUP_PROD_ENABLED }}
-          TARGET: ${{ github.event_name == 'workflow_dispatch' && inputs.target || 'all' }}
+          TARGET: ${{ github.event_name == 'workflow_dispatch' && inputs.target || github.event_name == 'push' && 'development' || 'all' }}
         run: |
           set -euo pipefail
           items=()
