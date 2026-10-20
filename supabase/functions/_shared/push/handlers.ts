@@ -17,7 +17,7 @@ export function pushDispatchHandler(deps: PushDeps) {
     const early = preflight(req);
     if (early) return early;
 
-    if (!(await jobSecretMatches(req.headers.get(JOB_SECRET_HEADER), deps.dispatchSecret))) {
+    if (!(await jobSecretMatches(req.headers.get(JOB_SECRET_HEADER), deps.verifyJobSecret))) {
       return notFound();
     }
     if (req.method !== "POST") return methodNotAllowed();
