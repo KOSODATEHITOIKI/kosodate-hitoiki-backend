@@ -18,9 +18,10 @@ expected_hash=$(sed -n 's/.*"dump_sha256":"\([0-9a-f]*\)".*/\1/p' "$DIR/manifest
 actual_hash=$(sha256sum "$DIR/dump.pgdump" | cut -d' ' -f1)
 [ "$expected_hash" = "$actual_hash" ] || { echo "ダンプのハッシュが一致しません" >&2; exit 1; }
 
-# 復元（台帳による再削除は行わない：件数を取得時と突き合わせるため。再削除は台帳の検証で別に確かめる）
+# 復元（台帳による再削除は、件数の突き合わせのあとに別で確かめる。ここでは行わない）
 bash ./restore.sh "$DIR/dump.pgdump" >/dev/null
 
+KEYS="auth_users profiles posts comments reactions saved_posts blocks reports moderation_actions notifications admin_users deletion_ledger"
 actual=$(db_psql DST -c "select json_build_object(
   'auth_users', (select count(*) from auth.users),
   'profiles', (select count(*) from public.profiles),
@@ -36,13 +37,23 @@ actual=$(db_psql DST -c "select json_build_object(
   'deletion_ledger', (select count(*) from public.deletion_ledger)
 )")
 
-# manifest.json の counts と比べる（キーを順に比較）
+# manifest の counts_before / counts_after の範囲に、復元後の件数が収まること
+# （ダンプの途中で件数が変わっても、誤って失敗にしない）
+num() { # num <JSON> <キー> <セクション（省略可）>
+  local json="$1" key="$2" section="${3:-}"
+  if [ -n "$section" ]; then json=$(echo "$json" | sed -n "s/.*\"$section\":\({[^}]*}\).*/\1/p"); fi
+  echo "$json" | sed -n "s/.*\"$key\" *: *\([0-9]*\).*/\1/p"
+}
+manifest=$(tr -d '\n' < "$DIR/manifest.json")
 fail=0
-for key in auth_users profiles posts comments reactions saved_posts blocks reports moderation_actions notifications admin_users deletion_ledger; do
-  e=$(sed -n "s/.*\"counts\":.*\"$key\" *: *\([0-9]*\).*/\1/p" "$DIR/manifest.json")
-  a=$(echo "$actual" | sed -n "s/.*\"$key\" *: *\([0-9]*\).*/\1/p")
-  if [ "$e" != "$a" ]; then
-    echo "不一致：$key（バックアップ時 ${e:-?} / 復元後 ${a:-?}）" >&2
+for key in $KEYS; do
+  b=$(num "$manifest" "$key" counts_before)
+  a=$(num "$manifest" "$key" counts_after)
+  r=$(num "$actual" "$key")
+  if [ -z "$b" ] || [ -z "$a" ] || [ -z "$r" ]; then echo "件数を読めません：$key" >&2; fail=1; continue; fi
+  lo=$(( b < a ? b : a )); hi=$(( b > a ? b : a ))
+  if [ "$r" -lt "$lo" ] || [ "$r" -gt "$hi" ]; then
+    echo "不一致：$key（バックアップ時 ${lo}〜${hi} / 復元後 ${r}）" >&2
     fail=1
   fi
 done

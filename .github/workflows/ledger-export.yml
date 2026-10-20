@@ -1,0 +1,98 @@
+name: Ledger export
+
+# 削除の台帳（IDと時刻だけ）を、1時間ごとに暗号化して S3 へ書き出す。
+# バックアップの取得後に削除されたものを、データベースごと失っても追えるようにし、
+# 復元で削除済みのデータが再公開されないようにする（docs/運用手順.md）。
+# 有効にするのは、リポジトリの Variables で BACKUP_DEV_ENABLED / BACKUP_PROD_ENABLED を "true" にしたときだけ。
+
+on:
+  schedule:
+    - cron: "7 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ledger-export
+  cancel-in-progress: false
+
+jobs:
+  # どの環境を対象にするかを決める（Variablesで有効にした環境だけ）。ジョブの if では matrix が使えないため、
+  # ここで組み立てた結果を、次のジョブの matrix に渡す。
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+      count: ${{ steps.m.outputs.count }}
+    steps:
+      - id: m
+        env:
+          DEV_ENABLED: ${{ vars.BACKUP_DEV_ENABLED }}
+          PROD_ENABLED: ${{ vars.BACKUP_PROD_ENABLED }}
+          TARGET: ${{ 'all' }}
+        run: |
+          set -euo pipefail
+          items=()
+          if [ "$DEV_ENABLED" = "true" ] && { [ "$TARGET" = "all" ] || [ "$TARGET" = "development" ]; }; then
+            items+=('{"target":"development","environment":"backup-development"}')
+          fi
+          if [ "$PROD_ENABLED" = "true" ] && { [ "$TARGET" = "all" ] || [ "$TARGET" = "production" ]; }; then
+            items+=('{"target":"production","environment":"backup-production"}')
+          fi
+          json=$(IFS=,; echo "${items[*]:-}")
+          echo "matrix={\"include\":[$json]}" >> "$GITHUB_OUTPUT"
+          echo "count=${#items[@]}" >> "$GITHUB_OUTPUT"
+          echo "対象の環境：${#items[@]}件"
+
+  export:
+    name: Export ledger (${{ matrix.target }})
+    needs: plan
+    if: ${{ needs.plan.outputs.count != '0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: ${{ matrix.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Export the ledger (read-only connection)
+        env:
+          SRC_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+          OUT: ${{ runner.temp }}/ledger.json
+        run: bash scripts/ops/ledger-export.sh
+      - name: Encrypt (age)
+        env:
+          RECIPIENTS: ${{ vars.BACKUP_AGE_RECIPIENTS }}
+        run: |
+          set -euo pipefail
+          [ -n "$RECIPIENTS" ] || { echo "BACKUP_AGE_RECIPIENTS（暗号化の公開鍵）が未設定です" >&2; exit 1; }
+          sudo apt-get install -y --no-install-recommends age >/dev/null
+          args=()
+          for r in $RECIPIENTS; do args+=(-r "$r"); done
+          age "${args[@]}" < "${{ runner.temp }}/ledger.json" > "${{ runner.temp }}/ledger.json.age"
+          rm -f "${{ runner.temp }}/ledger.json"
+      - name: Configure AWS credentials (OIDC, temporary)
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ vars.AWS_BACKUP_ROLE_ARN }}
+          aws-region: ap-northeast-1
+      - name: Upload to S3
+        env:
+          BUCKET: ${{ vars.BACKUP_BUCKET }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+          key="ledger/${TARGET}/$(date -u +%Y/%m/%d)/ledger-${stamp}.json.age"
+          aws s3 cp "${{ runner.temp }}/ledger.json.age" "s3://${BUCKET}/${key}" --no-progress
+          echo "保管しました：s3://${BUCKET}/${key}"

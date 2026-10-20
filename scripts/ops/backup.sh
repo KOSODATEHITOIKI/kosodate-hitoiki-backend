@@ -17,31 +17,8 @@ OUT="${OUT:-./backup-out}"
 mkdir -p "$OUT"
 rm -f "$OUT/dump.pgdump" "$OUT/manifest.json"
 
-# auth のうち、含めないテーブルのデータを除外する指定を作る。
-exclude_args=()
-while IFS= read -r t; do
-  [ -z "$t" ] && continue
-  case " $AUTH_KEEP_TABLES " in *" $t "*) continue ;; esac
-  exclude_args+=("--exclude-table-data=auth.$t")
-done < <(db_psql SRC -c "select table_name from information_schema.tables where table_schema='auth' and table_type='BASE TABLE' order by 1")
-
-log "ダンプを取得（データのみ、public と auth の一部）"
-db_dump SRC --format=custom --data-only --no-owner --no-privileges \
-  -n public -n auth \
-  --exclude-table-data=public.push_deliveries \
-  --exclude-table-data=public.request_budget \
-  --exclude-table-data=public.idempotency_keys \
-  "${exclude_args[@]}" > "$OUT/dump.pgdump"
-
-# 空のダンプを「成功」にしない
-size=$(wc -c < "$OUT/dump.pgdump" | tr -d ' ')
-if [ "$size" -lt 1000 ]; then
-  echo "ダンプが小さすぎます（${size}バイト）。取得に失敗した可能性があります。" >&2
-  exit 1
-fi
-
-# 復元後に突き合わせるための、主要なテーブルの件数
-counts=$(db_psql SRC -c "select json_build_object(
+# 主要なテーブルの件数。復元後に、元の件数と突き合わせるために記録する。
+COUNTS_SQL="select json_build_object(
   'auth_users', (select count(*) from auth.users),
   'profiles', (select count(*) from public.profiles),
   'posts', (select count(*) from public.posts),
@@ -54,9 +31,38 @@ counts=$(db_psql SRC -c "select json_build_object(
   'notifications', (select count(*) from public.notifications),
   'admin_users', (select count(*) from public.admin_users),
   'deletion_ledger', (select count(*) from public.deletion_ledger)
-)")
+)"
+
+# auth のうち、含めないテーブルのデータを除外する指定を作る。
+exclude_args=()
+while IFS= read -r t; do
+  [ -z "$t" ] && continue
+  case " $AUTH_KEEP_TABLES " in *" $t "*) continue ;; esac
+  exclude_args+=("--exclude-table-data=auth.$t")
+done < <(db_psql SRC -c "select table_name from information_schema.tables where table_schema='auth' and table_type='BASE TABLE' order by 1")
+
+# 稼働中のDBでは、ダンプの途中で件数が変わる。ダンプの前後の件数を記録し、
+# 復元後の件数がその範囲に収まるかで検証する（verify-backup.sh）。
+counts_before=$(db_psql SRC -c "$COUNTS_SQL")
+
+log "ダンプを取得（データのみ、public と auth の一部）"
+db_dump SRC --format=custom --data-only --no-owner --no-privileges \
+  -n public -n auth \
+  --exclude-table-data=public.push_deliveries \
+  --exclude-table-data=public.request_budget \
+  --exclude-table-data=public.idempotency_keys \
+  "${exclude_args[@]}" > "$OUT/dump.pgdump"
+
+counts_after=$(db_psql SRC -c "$COUNTS_SQL")
+
+# 空のダンプを「成功」にしない
+size=$(wc -c < "$OUT/dump.pgdump" | tr -d ' ')
+if [ "$size" -lt 1000 ]; then
+  echo "ダンプが小さすぎます（${size}バイト）。取得に失敗した可能性があります。" >&2
+  exit 1
+fi
 
 hash=$(sha256sum "$OUT/dump.pgdump" | cut -d' ' -f1)
-printf '{"dumped_at":"%s","dump_bytes":%s,"dump_sha256":"%s","counts":%s}\n' \
-  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$size" "$hash" "$counts" > "$OUT/manifest.json"
+printf '{"dumped_at":"%s","dump_bytes":%s,"dump_sha256":"%s","counts_before":%s,"counts_after":%s}\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$size" "$hash" "$counts_before" "$counts_after" > "$OUT/manifest.json"
 log "完了：${size}バイト"
