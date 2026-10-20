@@ -83,6 +83,7 @@ npm run functions:check      # Edge Functionsのfmt・lint・型検査（Deno、
 npm run functions:test       # Edge FunctionsのDenoテスト
 npm run test:functions-integration  # Functionsの配線の結合テスト（要 supabase start）
 npm run test:functions-smoke        # Edge Runtime上で全Functionが読み込めるかの確認（要 supabase start）
+bash infra/portable/run.sh          # Supabaseなしの素のPostgres 17で、全マイグレーションとpgTAPを通す（AWS移行の段階1、要 Docker）
 ```
 
 マイグレーションを追加・変更したら、必ず`npx supabase db reset`と`npx supabase test db`をローカルで実行してから push する。CIの`Database (migrations and RLS)`ジョブでも同じ検証が走る。

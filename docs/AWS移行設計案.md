@@ -68,7 +68,9 @@
 | 7 | Flutterアプリの切り替え（ログインはCognito、REST先とFunctionsの宛先を変更） | 受け入れ確認（#22） |
 | 8 | prodの作成と、リリース | 手順を確認したリリース工程 |
 
-**段階1は、AWSを触らずに、いますぐ始められる**。Supabaseから離れられる見込みの有無を、最小の費用で確かめられる。
+**段階1は、AWSを触らずにできる**。Supabaseから離れられる見込みの有無を、最小の費用で確かめられる。
+
+**段階1の状況（2026-10-20）**：完了。`infra/portable/run.sh` が、素のPostgres 17（pgTAPとpg_cronを加えたもの）に、互換層（`infra/portable/compat.sql`）と全マイグレーションを適用し、**pgTAP全件（15ファイル・475件）を通す**。CI（`Portable Postgres (no Supabase)`）で保つ。Supabase側のテストも変わらず通る。マイグレーション側の変更は2か所だけで、Supabase上の動作は変えていない：①Storageのバケット作成は、storageスキーマがあるときだけ、②PGroongaの拡張・索引は使える環境だけで作り、無い環境では索引なしの代替の検索にする（段階5でpg_bigmに置き換える）。
 
 ## 4. 見積もり（目安）
 

@@ -45,22 +45,29 @@ SELECT hasnt_column('public', 'public_profiles', 'bio',
   'public_profiles にプロフィール本文（bio）は含まれない');
 
 -- --- Storage：バケットは公開、書き込みはEdge Functionsのみ ---
-SELECT is(
-  (SELECT public FROM storage.buckets WHERE id = 'avatars'),
-  true,
-  'avatars バケットは公開URLで閲覧できる'
-);
+-- Storage（Supabase）がない環境（AWSではS3）では、この2件はスキップする。
+SELECT CASE WHEN to_regclass('storage.buckets') IS NULL
+  THEN skip('Storageがない環境（AWSではS3）', 1)
+  ELSE results_eq(
+    'select public from storage.buckets where id = ''avatars''',
+    'select true',
+    'avatars バケットは公開URLで閲覧できる'
+  )
+END;
 
 SET LOCAL role = 'authenticated';
 SET LOCAL request.jwt.claim.sub = '00000000-0000-0000-0000-0000000000a1';
 
-SELECT throws_ok(
-  $$insert into storage.objects (bucket_id, name, owner)
-    values ('avatars', '00000000-0000-0000-0000-0000000000a1/direct.png', auth.uid())$$,
-  '42501',
-  null,
-  'クライアントから avatars へ直接アップロードできない（確認を迂回させない）'
-);
+SELECT CASE WHEN to_regclass('storage.objects') IS NULL
+  THEN skip('Storageがない環境（AWSではS3）', 1)
+  ELSE throws_ok(
+    $$insert into storage.objects (bucket_id, name, owner)
+      values ('avatars', '00000000-0000-0000-0000-0000000000a1/direct.png', auth.uid())$$,
+    '42501',
+    null,
+    'クライアントから avatars へ直接アップロードできない（確認を迂回させない）'
+  )
+END;
 
 -- --- 利用規約同意の記録 ---
 SELECT is(
