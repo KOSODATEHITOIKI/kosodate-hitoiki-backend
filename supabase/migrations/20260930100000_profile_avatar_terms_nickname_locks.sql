@@ -19,9 +19,16 @@ from public.profiles;
 
 -- Storageの`avatars`バケット：閲覧は公開URL、書き込みはEdge Functions（service_role）のみ。
 -- storage.objectsにはクライアント向けのINSERT/UPDATE/DELETEポリシーを作らない（確認を迂回させない）。
-insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-values ('avatars', 'avatars', true, 2097152, array['image/jpeg', 'image/png', 'image/webp'])
-on conflict (id) do nothing;
+-- Supabase以外（AWSではS3）にはStorageがないため、storageスキーマがあるときだけ作る。
+do $$
+begin
+  if to_regclass('storage.buckets') is not null then
+    insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+    values ('avatars', 'avatars', true, 2097152, array['image/jpeg', 'image/png', 'image/webp'])
+    on conflict (id) do nothing;
+  end if;
+end
+$$;
 
 -- === 利用規約同意の記録 ===
 -- 規約の版（terms_version）は運営が付ける文字列。規約本文・法務確認は別途（docs/未決事項.md）。
