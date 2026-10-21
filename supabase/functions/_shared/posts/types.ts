@@ -12,6 +12,17 @@ export interface PostsDb {
     kind: "post" | "comment" | "edit",
     idempotencyKey?: string | null,
   ): Promise<void>;
+  /**
+   * 完了済みのIdempotency-Keyの保存済みの結果。なければ null。外部API（送信前チェック）を呼ぶ前に確かめ、
+   * 外部APIが止まっていても、保存済みの結果は返せるようにする。
+   */
+  replayResponse(
+    userId: string,
+    kind: "post" | "comment",
+    key: string,
+  ): Promise<Record<string, unknown> | null>;
+  /** 作成の応答の「相談先の案内」を、再送でも返せるよう、保存済みの結果へ書き足す。 */
+  rememberSupportNotice(userId: string, kind: "post" | "comment", key: string): Promise<void>;
   createPost(a: {
     userId: string;
     postType: PostType;

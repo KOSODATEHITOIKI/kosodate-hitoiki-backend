@@ -30,6 +30,11 @@ export function createPostsDeps(): PostsDeps {
         p_idempotency_key: idempotencyKey ?? null,
       });
     },
+    replayResponse: (userId, kind, key) =>
+      rpc("replay_idempotent_response", { p_user_id: userId, p_kind: kind, p_key: key }),
+    rememberSupportNotice: async (userId, kind, key) => {
+      await rpc("remember_support_notice", { p_user_id: userId, p_kind: kind, p_key: key });
+    },
     createPost: (a) =>
       rpc("create_post", {
         p_user_id: a.userId,

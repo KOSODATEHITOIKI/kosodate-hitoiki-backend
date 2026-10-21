@@ -6,6 +6,7 @@
  */
 import { assert, assertEquals } from "@std/assert";
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
+import { ModerationUnavailableError } from "../moderation/types.ts";
 import { createProfileDeps } from "../profile/wiring.ts";
 import { createProfileHandler } from "../profile/handlers.ts";
 import { commentsHandler, postsHandler } from "./handlers.ts";
@@ -187,5 +188,53 @@ Deno.test("配線：投稿→コメント→返信→編集→削除（実際の
   } finally {
     await admin.auth.admin.deleteUser(owner.userId);
     await admin.auth.admin.deleteUser(guest.userId);
+  }
+});
+
+Deno.test("配線：保存済みの再送は、外部API（送信前チェック）が止まっていても返る。相談先の案内も残る（実際のDB）", async () => {
+  const caution: PostsDeps = {
+    ...createPostsDeps(),
+    moderation: { moderate: () => Promise.resolve({ "self-harm": 0.9 }) },
+  };
+  const down: PostsDeps = {
+    ...createPostsDeps(),
+    moderation: {
+      moderate: () => Promise.reject(new ModerationUnavailableError()),
+    },
+  };
+  const user = await signUp("replay", "さいそう");
+  // 登録直後の上限（別の確認）に当たらないよう、登録から日数が経った利用者にする
+  await admin.from("profiles").update({
+    created_at: new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString(),
+  }).eq("id", user.userId);
+  const post = (d: PostsDeps, key: string) =>
+    postsHandler(d)(
+      req("POST", "/posts", user.token, { post_type: "guchi", body: "つらいです" }, {
+        "Idempotency-Key": key,
+      }),
+    );
+  const count = async () =>
+    (await admin.from("posts").select("id").eq("author_id", user.userId)).data?.length;
+  try {
+    const first = await post(caution, "it-replay-key");
+    assertEquals(first.status, 201);
+    const created = await first.json();
+    assertEquals(created.support_notice, true);
+
+    // 応答が届かなかったとして再送。外部APIは止まっているが、保存済みの結果が返る
+    const again = await post(down, "it-replay-key");
+    assertEquals(again.status, 201);
+    const replayed = await again.json();
+    assertEquals(replayed.id, created.id);
+    assertEquals(replayed.created_at, created.created_at);
+    assertEquals(replayed.support_notice, true); // 相談先の案内も、再送で消えない
+    assertEquals(await count(), 1);
+
+    // 新しいキーは、保存済みではないので、外部APIの障害（503）になる（保存しない）
+    const other = await post(down, "it-replay-other");
+    assertEquals(other.status, 503);
+    assertEquals(await count(), 1);
+  } finally {
+    await admin.auth.admin.deleteUser(user.userId);
   }
 });

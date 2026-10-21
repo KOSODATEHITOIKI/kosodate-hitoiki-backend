@@ -19,6 +19,8 @@ export interface Fake {
     removeReaction: string[];
     moderated: string[];
     preflight: string[];
+    replayLookups: string[];
+    supportNoticeRemembered: string[];
   };
 }
 
@@ -33,6 +35,10 @@ export function makeFake(options: {
   preflightRule?: string;
   /** DB関数が想定外のエラーを返す。 */
   unexpected?: boolean;
+  /** 完了済みのIdempotency-Keyの保存済みの結果（再送）。 */
+  replay?: Record<string, unknown>;
+  /** 相談先の案内の書き足しが失敗する。 */
+  rememberFails?: boolean;
 } = {}): Fake {
   const fake: Fake = {
     calls: {
@@ -47,6 +53,8 @@ export function makeFake(options: {
       removeReaction: [],
       moderated: [],
       preflight: [],
+      replayLookups: [],
+      supportNoticeRemembered: [],
     },
     deps: undefined as unknown as PostsDeps,
   };
@@ -69,6 +77,15 @@ export function makeFake(options: {
       preflight: (_u, kind) => {
         fake.calls.preflight.push(kind);
         if (options.preflightRule) throw new RuleError(options.preflightRule);
+        return Promise.resolve();
+      },
+      replayResponse: (_u, kind, key) => {
+        fake.calls.replayLookups.push(`${kind}:${key}`);
+        return Promise.resolve(options.replay ?? null);
+      },
+      rememberSupportNotice: (_u, kind, key) => {
+        if (options.rememberFails) return Promise.reject(new Error("boom"));
+        fake.calls.supportNoticeRemembered.push(`${kind}:${key}`);
         return Promise.resolve();
       },
       createPost: (a) => {
