@@ -191,6 +191,43 @@ Deno.test("配線：投稿→コメント→返信→編集→削除（実際の
   }
 });
 
+Deno.test("配線：確認（409）のあと、同じIdempotency-Keyで再送しても、投稿は1件だけ（実際のDB）", async () => {
+  // 境界域（harassment 0.6）：最初は409、confirmed=true で保存される
+  const borderline: PostsDeps = {
+    ...createPostsDeps(),
+    moderation: { moderate: () => Promise.resolve({ harassment: 0.6 }) },
+  };
+  const user = await signUp("confirm", "かくにん");
+  const send = (body: Record<string, unknown>) =>
+    postsHandler(borderline)(
+      req("POST", "/posts", user.token, {
+        post_type: "guchi",
+        body: "つらい日でした",
+        ...body,
+      }, { "Idempotency-Key": "it-confirm-key" }),
+    );
+  const count = async () =>
+    (await admin.from("posts").select("id").eq("author_id", user.userId)).data?.length;
+  try {
+    const first = await send({});
+    assertEquals(first.status, 409);
+    assertEquals((await first.json()).error.code, "MODERATION_CONFIRM_REQUIRED");
+    assertEquals(await count(), 0); // 409 では保存されず、キーも「完了」にならない
+
+    const second = await send({ confirmed: true }); // 同じキーでの再送
+    assertEquals(second.status, 201);
+    const postId = (await second.json()).id as string;
+    assertEquals(await count(), 1);
+
+    const retry = await send({ confirmed: true }); // 通信の失敗などで、さらに再送
+    assertEquals(retry.status, 201);
+    assertEquals((await retry.json()).id, postId);
+    assertEquals(await count(), 1); // 二重投稿にならない
+  } finally {
+    await admin.auth.admin.deleteUser(user.userId);
+  }
+});
+
 Deno.test("配線：保存済みの再送は、外部API（送信前チェック）が止まっていても返る。相談先の案内も残る（実際のDB）", async () => {
   const caution: PostsDeps = {
     ...createPostsDeps(),
