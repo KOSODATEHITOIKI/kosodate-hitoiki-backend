@@ -11,7 +11,7 @@ INSERT INTO auth.users (id) VALUES
 
 INSERT INTO public.profiles (id, nickname, icon_key, avatar_path) VALUES
   ('00000000-0000-0000-0000-0000000000a1', 'えー', NULL, NULL),
-  ('00000000-0000-0000-0000-0000000000a2', 'びー', 'bear_01', NULL),
+  ('00000000-0000-0000-0000-0000000000a2', 'びー', 'sprout', NULL),
   ('00000000-0000-0000-0000-0000000000a3', 'しー', NULL, '00000000-0000-0000-0000-0000000000a3/x.png');
 
 -- 本人の設定として、AがBをブロックする（RLSの本人用ポリシー経由）
@@ -27,7 +27,7 @@ SELECT is(
   'びー', '相手のニックネームが取れる');
 SELECT is(
   (SELECT blocked_icon_key FROM public.my_blocks WHERE blocked_id = '00000000-0000-0000-0000-0000000000a2'),
-  'bear_01', '相手のアイコンが取れる');
+  'sprout', '相手のアイコンが取れる');
 SELECT is(
   (SELECT array_agg(attname::text ORDER BY attnum) FROM pg_attribute
    WHERE attrelid = 'public.my_blocks'::regclass AND attnum > 0 AND NOT attisdropped),

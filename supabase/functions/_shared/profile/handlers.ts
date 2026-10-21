@@ -43,6 +43,14 @@ function errorToResponse(e: unknown): Response {
     if (e.code === "NOT_FOUND") {
       return errorResponse(404, "NOT_FOUND", "プロフィールが見つかりません。");
     }
+    // 外部キー違反（決まったアイコン以外）・check違反（決まった年齢帯以外）：入力の誤り。
+    if (e.code === "23503" || e.code === "23514") {
+      return errorResponse(
+        422,
+        "VALIDATION_FAILED",
+        "アイコンまたは年齢帯の指定が正しくありません。",
+      );
+    }
     if (e.code === "REQUEST_LIMITED") {
       return errorResponse(
         429,

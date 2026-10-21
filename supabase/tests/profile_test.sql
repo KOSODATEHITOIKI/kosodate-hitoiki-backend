@@ -25,7 +25,7 @@ SELECT lives_ok(
 );
 
 SELECT throws_ok(
-  $$update public.profiles set icon_key = 'bear'
+  $$update public.profiles set icon_key = 'sun'
     where id = '00000000-0000-0000-0000-0000000000a1'$$,
   '23514',
   null,
@@ -33,7 +33,7 @@ SELECT throws_ok(
 );
 
 SELECT lives_ok(
-  $$update public.profiles set avatar_path = null, icon_key = 'bear'
+  $$update public.profiles set avatar_path = null, icon_key = 'sun'
     where id = '00000000-0000-0000-0000-0000000000a1'$$,
   'アップロード画像を外してイラストに切り替えられる'
 );
@@ -92,7 +92,7 @@ INSERT INTO auth.users (id) VALUES
   ('00000000-0000-0000-0000-0000000000b2');
 
 SELECT is(
-  public.create_profile('00000000-0000-0000-0000-0000000000b1', 'あおい', '自己紹介', '0〜1歳', null, '2026-10'),
+  public.create_profile('00000000-0000-0000-0000-0000000000b1', 'あおい', '自己紹介', 'age_0_1', null, '2026-10'),
   'created',
   '新規登録は created を返す'
 );
@@ -105,7 +105,7 @@ SELECT is(
 );
 
 SELECT is(
-  public.create_profile('00000000-0000-0000-0000-0000000000b1', 'あおい', '自己紹介', '0〜1歳', null, '2026-10'),
+  public.create_profile('00000000-0000-0000-0000-0000000000b1', 'あおい', '自己紹介', 'age_0_1', null, '2026-10'),
   'exists',
   '応答が届かず再送された同じ登録は、重複せず exists を返す'
 );

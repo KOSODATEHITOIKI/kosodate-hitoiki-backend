@@ -148,7 +148,7 @@ Deno.test("結合：公開バケットの画像から位置情報が除かれ、
     const current = (await admin.from("profiles").select("avatar_path").eq("id", user.userId)
       .single()).data!.avatar_path as string;
     const upd = await updateProfileHandler(profileDeps)(
-      req("PATCH", "/profile-update", user.token, { icon_key: "bear_01" }),
+      req("PATCH", "/profile-update", user.token, { icon_key: "sun" }),
     );
     assertEquals(upd.status, 200);
     assert((await avatars.download(current)).error !== null, "イラストへ変更後も画像が残った");
