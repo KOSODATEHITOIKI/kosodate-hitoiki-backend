@@ -73,6 +73,8 @@ jobs:
         run: npx supabase test db
       - name: Check the monitoring script (normal, DB unreachable, over threshold)
         run: bash scripts/ops/test-health-check.sh
+      - name: Check the logged-in exposure script (normal, holes are detected)
+        run: bash scripts/ops/test-check-authenticated.sh
       - name: Run concurrency tests
         run: npm run test:concurrency
       # Denoの実行ファイルはnpmのpostinstallで取得する（上のnpm ciは--ignore-scripts）。

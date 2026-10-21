@@ -89,6 +89,8 @@ bash infra/portable/run.sh          # Supabaseなしの素のPostgres 17で、�
 bash infra/portable/rest.sh         # PostgREST越しに、実際のHTTPで権限（未ログイン・本人・運営者・不正なトークン）を確かめる（AWS移行の段階2、要 Docker）
 bash scripts/ops/verify-local.sh    # バックアップ→削除→復元→台帳で再削除、を通しで確かめる（要 supabase start。ローカルのDBを置き換える）
 API_URL=… ANON_KEY=… bash scripts/ops/check-exposure.sh   # 動いている環境の公開範囲を、未ログインの鍵だけで確かめる
+API_URL=… ANON_KEY=… EMAIL_A=… PASSWORD_A=… [EMAIL_B=… PASSWORD_B=…] node scripts/ops/check-authenticated.mjs   # ログイン済み（テスト用アカウント）の視点で、他人・運営・内部のデータに届かないことを確かめる
+bash scripts/ops/test-health-check.sh   # 監視スクリプトが、異常を正常と取り違えないことを確かめる（要 supabase start）
 ```
 
 マイグレーションを追加・変更したら、必ず`npx supabase db reset`と`npx supabase test db`をローカルで実行してから push する。CIの`Database (migrations and RLS)`ジョブでも同じ検証が走る。
