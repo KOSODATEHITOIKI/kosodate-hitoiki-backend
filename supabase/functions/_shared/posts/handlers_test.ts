@@ -550,3 +550,101 @@ Deno.test("外部API前の確認：DBのエラーから、利用者ごとのリ�
   assertEquals(ok.code, "REQUEST_LIMITED");
   assertEquals(ok.retryAt, "2026-10-15T12:10:00.000Z");
 });
+
+// --- 再送（保存済みの結果）・CORS ---
+
+const KEY = "11111111-1111-4111-8111-111111111111";
+
+Deno.test("CORS：プリフライトが、Idempotency-Keyヘッダーを許可する（Flutter Web）", async () => {
+  const f = makeFake();
+  const res = await postsHandler(f.deps)(
+    new Request("http://localhost/posts", { method: "OPTIONS" }),
+  );
+  assertEquals(res.status, 204);
+  const allowed = (res.headers.get("Access-Control-Allow-Headers") ?? "").toLowerCase();
+  assert(allowed.includes("idempotency-key"), allowed);
+  assert(allowed.includes("authorization"), allowed);
+});
+
+Deno.test("投稿の再送：保存済みなら、外部API（送信前チェック）が止まっていても、最初の結果を返す", async () => {
+  const f = makeFake({
+    moderationDown: true,
+    replay: { id: POST_ID, created_at: "2026-10-14T00:00:00Z", support_notice: true },
+  });
+  const res = await postsHandler(f.deps)(
+    req("POST", "/posts", validPost, { "Idempotency-Key": KEY }),
+  );
+  assertEquals(res.status, 201);
+  assertEquals(await res.json(), {
+    id: POST_ID,
+    created_at: "2026-10-14T00:00:00Z",
+    support_notice: true,
+  });
+  assertEquals(f.calls.moderated.length, 0); // 外部APIを呼んでいない
+  assertEquals(f.calls.createPost.length, 0); // 重複して作っていない
+  assertEquals(f.calls.preflight, ["post"]); // 資格・上限の確認は、先に行っている
+  assertEquals(f.calls.replayLookups, [`post:${KEY}`]);
+});
+
+Deno.test("投稿の再送：記録された相談先の案内がなければ false。キーがなければ、保存済みの確認をしない", async () => {
+  const f = makeFake({ replay: { id: POST_ID, created_at: "2026-10-14T00:00:00Z" } });
+  const res = await postsHandler(f.deps)(
+    req("POST", "/posts", validPost, { "Idempotency-Key": KEY }),
+  );
+  assertEquals((await res.json()).support_notice, false);
+
+  const g = makeFake({ replay: { id: POST_ID, created_at: "2026-10-14T00:00:00Z" } });
+  const fresh = await postsHandler(g.deps)(req("POST", "/posts", validPost)); // キーなし
+  assertEquals(fresh.status, 201);
+  assertEquals(g.calls.replayLookups.length, 0);
+  assertEquals(g.calls.createPost.length, 1);
+});
+
+Deno.test("投稿の再送：資格・上限の確認（preflight）で止まるものは、保存済みの結果を返す前に止まる", async () => {
+  const f = makeFake({
+    preflightRule: "REQUEST_LIMITED",
+    replay: { id: POST_ID, created_at: "2026-10-14T00:00:00Z" },
+  });
+  const res = await postsHandler(f.deps)(
+    req("POST", "/posts", validPost, { "Idempotency-Key": KEY }),
+  );
+  assertEquals(res.status, 429);
+  assertEquals(f.calls.replayLookups.length, 0);
+});
+
+Deno.test("コメントの再送：保存済みなら、外部APIが止まっていても、最初の結果を返す", async () => {
+  const f = makeFake({
+    moderationDown: true,
+    replay: { id: COMMENT_ID, created_at: "2026-10-14T00:00:00Z" },
+  });
+  const res = await commentsHandler(f.deps)(
+    req("POST", "/comments", validComment, { "Idempotency-Key": KEY }),
+  );
+  assertEquals(res.status, 201);
+  assertEquals((await res.json()).id, COMMENT_ID);
+  assertEquals(f.calls.moderated.length, 0);
+  assertEquals(f.calls.createComment.length, 0);
+  assertEquals(f.calls.replayLookups, [`comment:${KEY}`]);
+});
+
+Deno.test("投稿：相談先の案内は、再送でも返せるよう記録する。記録に失敗しても、投稿の応答は変わらない", async () => {
+  const f = makeFake({ scores: { "self-harm": 0.9 } });
+  const res = await postsHandler(f.deps)(
+    req("POST", "/posts", validPost, { "Idempotency-Key": KEY }),
+  );
+  assertEquals(res.status, 201);
+  assertEquals((await res.json()).support_notice, true);
+  assertEquals(f.calls.supportNoticeRemembered, [`post:${KEY}`]);
+
+  const g = makeFake({ scores: { "self-harm": 0.9 }, rememberFails: true });
+  const failed = await postsHandler(g.deps)(
+    req("POST", "/posts", validPost, { "Idempotency-Key": KEY }),
+  );
+  assertEquals(failed.status, 201);
+  assertEquals((await failed.json()).support_notice, true);
+
+  // 案内が不要なら、記録しない
+  const h = makeFake();
+  await postsHandler(h.deps)(req("POST", "/posts", validPost, { "Idempotency-Key": KEY }));
+  assertEquals(h.calls.supportNoticeRemembered.length, 0);
+});

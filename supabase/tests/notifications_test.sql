@@ -2,7 +2,7 @@
 -- 注意：auth.uid() は、単数形の request.jwt.claim.sub を、JSONのclaimsより優先する。
 
 BEGIN;
-SELECT plan(42);
+SELECT plan(46);
 
 INSERT INTO auth.users (id) VALUES
   ('00000000-0000-0000-0000-0000000000d1'), -- 投稿者
@@ -119,6 +119,24 @@ UPDATE public.posts SET hidden_at = null WHERE id = '00000000-0000-0000-0000-000
 UPDATE public.notification_settings SET reactions_enabled = false WHERE user_id = '00000000-0000-0000-0000-0000000000d1';
 SELECT is(public.generate_reaction_digests(now() + interval '4 days'), 0, '共感の通知を止めていると、まとめ通知は作らない');
 UPDATE public.notification_settings SET reactions_enabled = true WHERE user_id = '00000000-0000-0000-0000-0000000000d1';
+
+-- 集計のあとにコミットされた共感は、次回に数える（外部レビューの指摘）。
+-- 共感R1は集計の前に確定している。共感R2は、集計の「前」の時刻で作られたが、集計の「あと」に確定した（長いトランザクション）。
+-- 以前は、前回の集計の時刻より前のR2を、次回も数えなかった。
+INSERT INTO public.reactions (post_id, user_id, reaction_type_id, created_at)
+VALUES ('00000000-0000-0000-0000-0000000000f1', '00000000-0000-0000-0000-0000000000d2', (SELECT min(id) FROM public.reaction_types), now() + interval '5 days' - interval '1 hour');
+SELECT is(public.generate_reaction_digests(now() + interval '5 days'), 1, '集計：まとめ通知ができる');
+SELECT is(
+  (SELECT reaction_count FROM public.notifications
+   WHERE notification_type = 'reaction_digest' AND digest_date = ((now() + interval '5 days') at time zone 'Asia/Tokyo')::date),
+  2, '集計に入ったのは、R1と、止めている間に溜まっていた共感の2件');
+INSERT INTO public.reactions (post_id, user_id, reaction_type_id, created_at)
+VALUES ('00000000-0000-0000-0000-0000000000f2', '00000000-0000-0000-0000-0000000000d2', (SELECT min(id) FROM public.reaction_types), now() + interval '5 days' - interval '2 hours');
+SELECT is(public.generate_reaction_digests(now() + interval '6 days'), 1, '集計のあとに確定した共感（時刻は前回の集計より前）も、次回のまとめ通知に入る');
+SELECT is(
+  (SELECT reaction_count FROM public.notifications
+   WHERE notification_type = 'reaction_digest' AND digest_date = ((now() + interval '6 days') at time zone 'Asia/Tokyo')::date),
+  1, '次回に数えたのは、そのR2の1件（前回に数えた分は重ねない）');
 
 -- 定期実行が登録されている（毎日22:00 UTC＝日本時間の朝7時）
 SELECT is(

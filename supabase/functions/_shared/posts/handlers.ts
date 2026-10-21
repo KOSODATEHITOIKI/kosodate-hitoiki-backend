@@ -102,7 +102,28 @@ async function context(deps: PostsDeps, req: Request) {
   return userId ?? null;
 }
 
-/** 本文を送信前チェックにかけ、通ったものだけを保存する。 */
+type CheckedSaved<T> = { saved: T; supportNotice: boolean };
+
+/** 本文を送信前チェックにかけ、通ったものだけを保存する。編集には再送の仕組み（Idempotency-Key）がない。 */
+function checkedSave<T>(
+  deps: PostsDeps,
+  userId: string,
+  kind: "edit",
+  idempotencyKey: string | null,
+  body: string,
+  confirmed: boolean,
+  save: (verifiedBody: string) => Promise<T>,
+): Promise<{ blocked: Response } | CheckedSaved<T>>;
+/** 作成。完了済みのIdempotency-Keyの再送は、送信前チェックを呼ばず、保存済みの結果（replayed）を返す。 */
+function checkedSave<T>(
+  deps: PostsDeps,
+  userId: string,
+  kind: "post" | "comment",
+  idempotencyKey: string | null,
+  body: string,
+  confirmed: boolean,
+  save: (verifiedBody: string) => Promise<T>,
+): Promise<{ blocked: Response } | { replayed: Record<string, unknown> } | CheckedSaved<T>>;
 async function checkedSave<T>(
   deps: PostsDeps,
   userId: string,
@@ -111,9 +132,19 @@ async function checkedSave<T>(
   body: string,
   confirmed: boolean,
   save: (verifiedBody: string) => Promise<T>,
-): Promise<{ blocked: Response } | { saved: T; supportNotice: boolean }> {
+): Promise<
+  | { blocked: Response }
+  | { replayed: Record<string, unknown> }
+  | { saved: T; supportNotice: boolean }
+> {
   // 外部API（送信前チェック）を呼ぶ前に、操作の資格・上限・リクエスト数を確認する。
   await deps.db.preflight(userId, kind, idempotencyKey);
+  // 完了済みのIdempotency-Keyの再送は、保存済みの結果を返す。外部API（送信前チェック）は呼ばない
+  // （最初の保存のあとに応答が届かず再送したとき、外部APIが止まっていても、保存済みなのに失敗しないように）。
+  if (idempotencyKey && kind !== "edit") {
+    const replayed = await deps.db.replayResponse(userId, kind, idempotencyKey);
+    if (replayed) return { replayed };
+  }
   const { result, saved } = await moderateAndSave(
     { body },
     deps.moderation,
@@ -122,7 +153,20 @@ async function checkedSave<T>(
   );
   const blocked = responseForDecision(result);
   if (blocked) return { blocked };
+  // 相談先の案内は、再送でも同じように返せるよう、保存済みの結果へ書き足す（失敗しても、投稿には影響しない）。
+  if (result.supportNotice && idempotencyKey && kind !== "edit") {
+    try {
+      await deps.db.rememberSupportNotice(userId, kind, idempotencyKey);
+    } catch {
+      console.error("support notice could not be remembered");
+    }
+  }
   return { saved: saved as T, supportNotice: result.supportNotice };
+}
+
+/** 再送の応答。保存済みの結果と、記録してあった相談先の案内（なければ false）。 */
+function replayResponse(replayed: Record<string, unknown>): Response {
+  return jsonResponse(201, { ...replayed, support_notice: replayed.support_notice === true });
 }
 
 /** POST /posts（作成）、PUT・DELETE /posts/{id}/reaction（共感）、PATCH /posts/{id}（本文の編集）、DELETE /posts/{id}、PATCH /posts/{id}/reaction-mode */
@@ -173,6 +217,7 @@ export function postsHandler(deps: PostsDeps) {
             }),
         );
         if ("blocked" in out) return out.blocked;
+        if ("replayed" in out) return replayResponse(out.replayed);
         return jsonResponse(201, { ...out.saved, support_notice: out.supportNotice });
       }
 
@@ -289,6 +334,7 @@ export function commentsHandler(deps: PostsDeps) {
             }),
         );
         if ("blocked" in out) return out.blocked;
+        if ("replayed" in out) return replayResponse(out.replayed);
         return jsonResponse(201, { ...out.saved, support_notice: out.supportNotice });
       }
 
