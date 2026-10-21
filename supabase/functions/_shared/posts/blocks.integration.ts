@@ -96,6 +96,11 @@ Deno.test("結合：ブロックは一覧・詳細・コメントに反映され
     });
     assertEquals(dup.error?.code, "23505");
 
+    // ブロック中の相手の表示名（解除の画面用）：Aにだけ、Bのニックネームが見える。Bには、何も見えない
+    const mine = await a.client.from("my_blocks").select("blocked_id, blocked_nickname");
+    assertEquals(mine.data, [{ blocked_id: b.userId, blocked_nickname: "びーさん" }]);
+    assertEquals((await b.client.from("my_blocks").select("blocked_id")).data?.length, 0);
+
     // ブロック後：Aには、Bの投稿・コメント・通知が出ない
     assertEquals((await a.client.from("feed_posts").select("id").eq("id", bPost)).data?.length, 0);
     assertEquals(

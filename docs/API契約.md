@@ -319,6 +319,15 @@ POST   /rest/v1/muted_words        { "word": "..." }
 
 保存一覧（`saved_post_list`）は本人だけが取得でき、投稿の列に`saved_at`が付く。見えなくなった投稿（削除・一時非表示・ブロック・自分だけの非表示）は一覧に出ない（保存自体は残る）。**見えない投稿・存在しない投稿は保存できず、どちらも`42501`で、投稿の存在を知る手がかりにならない**。保存数・保存した事実は誰にも公開せず、通知もしない。共感・保存で投稿者へ通知は作られない（共感のまとめ通知は#19）。
 
+**ブロック中の相手の一覧（表示名つき）**：解除の画面用に、本人だけが読めるビュー `my_blocks` を使う。
+
+```http
+GET /rest/v1/my_blocks?select=*&order=created_at.desc
+Authorization: Bearer <token>
+```
+
+返す列は `blocked_id`・`blocked_nickname`・`blocked_icon_key`・`blocked_avatar_path`・`created_at` だけ（bio等は含まない）。**自分がブロックした行だけ**が返り、ブロックされた側・第三者・未ログインには、0件（未ログインは拒否）にしか見えない（ブロックされている事実を推測させない）。解除は、これまでどおり `DELETE /rest/v1/blocks?blocked_id=eq.<id>`。
+
 いずれもRLSで本人の行のみ操作可能（[権限表](権限表.md)5節）。PostgRESTの一意制約違反は`409`（PostgRESTの標準応答）として返る。重複操作を許したい場合は`Prefer: resolution=ignore-duplicates`を付ける。解除（`DELETE`）は、対象がなくてもエラーにならない（冪等）。自分自身のブロックは`400`（CHECK制約）。ブロックされた相手には通知せず、ブロックされている事実を参照する経路もない。
 
 ### 取得への反映（ログイン済み）
