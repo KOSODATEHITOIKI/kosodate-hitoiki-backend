@@ -1,6 +1,6 @@
 name: Backup
 
-# 毎日、データベースのバックアップを取り、**使い捨ての環境へ復元して検証**してから、暗号化して S3 に保管する。
+# 毎日、データベースのバックアップを取り、**使い捨ての環境へ復元して検証**してから、暗号化して Cloudflare R2（S3互換）に保管する。
 # 復元できないバックアップは成功にしない（失敗するとGitHubからメールが届く）。
 # 手順・鍵の管理・復元は docs/運用手順.md。
 #
@@ -72,7 +72,6 @@ jobs:
     environment: ${{ matrix.environment }}
     permissions:
       contents: read
-      id-token: write # AWSへ一時的な権限で接続する（OIDC）。長期のアクセスキーは使わない
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
@@ -114,22 +113,24 @@ jobs:
           # 暗号化前のファイルを、このあと残さない
           rm -rf "${{ runner.temp }}/backup"
           echo "暗号化したバックアップ：$(wc -c < "${{ runner.temp }}/backup.tar.age" | tr -d ' ')バイト"
-      - name: Configure AWS credentials (OIDC, temporary)
-        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
-        with:
-          role-to-assume: ${{ vars.AWS_BACKUP_ROLE_ARN }}
-          aws-region: ap-northeast-1
-      - name: Upload to S3 and verify the size
+      - name: Upload to R2 and verify the size
         env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          R2_ENDPOINT_URL: ${{ vars.R2_ENDPOINT_URL }}
           BUCKET: ${{ vars.BACKUP_BUCKET }}
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
           stamp="$(date -u +%Y%m%dT%H%M%SZ)"
           key="backups/${TARGET}/$(date -u +%Y/%m/%d)/backup-${stamp}.tar.age"
-          aws s3 cp "${{ runner.temp }}/backup.tar.age" "s3://${BUCKET}/${key}" --no-progress
+          [ -n "${R2_ENDPOINT_URL:-}" ] || { echo "R2_ENDPOINT_URL（保管先の接続先）が未設定です" >&2; exit 1; }
+          aws s3 cp "${{ runner.temp }}/backup.tar.age" "s3://${BUCKET}/${key}" --endpoint-url "$R2_ENDPOINT_URL" --no-progress
           local_size=$(wc -c < "${{ runner.temp }}/backup.tar.age" | tr -d ' ')
-          remote_size=$(aws s3api list-objects-v2 --bucket "$BUCKET" --prefix "$key" --query 'Contents[0].Size' --output text)
+          remote_size=$(aws s3api list-objects-v2 --endpoint-url "$R2_ENDPOINT_URL" --bucket "$BUCKET" --prefix "$key" --query 'Contents[0].Size' --output text)
           [ "$local_size" = "$remote_size" ] || { echo "保管したサイズが一致しません（${local_size} / ${remote_size}）" >&2; exit 1; }
           echo "保管しました：s3://${BUCKET}/${key}（${remote_size}バイト）"
       - name: Report success to the dead-man's switch (optional)

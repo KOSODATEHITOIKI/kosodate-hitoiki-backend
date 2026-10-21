@@ -59,7 +59,6 @@ jobs:
     environment: ${{ matrix.environment }}
     permissions:
       contents: read
-      id-token: write
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
@@ -79,20 +78,22 @@ jobs:
           ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
           EXPECT_EMAIL_CONFIRM: ${{ matrix.expect_email_confirm }}
         run: bash scripts/ops/check-exposure.sh
-      - name: Configure AWS credentials (OIDC, temporary)
-        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
-        with:
-          role-to-assume: ${{ vars.AWS_BACKUP_ROLE_ARN }}
-          aws-region: ap-northeast-1
       - name: Backups and ledger are fresh
         env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          R2_ENDPOINT_URL: ${{ vars.R2_ENDPOINT_URL }}
           BUCKET: ${{ vars.BACKUP_BUCKET }}
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
+          [ -n "${R2_ENDPOINT_URL:-}" ] || { echo "R2_ENDPOINT_URL（保管先の接続先）が未設定です" >&2; exit 1; }
           now=$(date -u +%s)
           fresh() { # fresh <prefix> <許容する秒数> <説明>
-            last=$(aws s3api list-objects-v2 --bucket "$BUCKET" --prefix "$1" \
+            last=$(aws s3api list-objects-v2 --endpoint-url "$R2_ENDPOINT_URL" --bucket "$BUCKET" --prefix "$1" \
               --query 'sort_by(Contents,&LastModified)[-1].LastModified' --output text 2>/dev/null || echo None)
             if [ "$last" = "None" ] || [ -z "$last" ]; then echo "FAIL - $3：1件もありません" >&2; return 1; fi
             age=$(( now - $(date -u -d "$last" +%s) ))
