@@ -72,7 +72,7 @@ Deno.test("配線：登録→ニックネーム変更→更新→画像→削除
     const created = await createProfileHandler(deps)(req("POST", token, {
       nickname: "はなこ",
       bio: "よろしくね",
-      child_age_range: "0〜1歳",
+      child_age_range: "age_0_1",
       terms_version: "2026-10",
     }));
     assertEquals(created.status, 201);
@@ -134,11 +134,11 @@ Deno.test("配線：登録→ニックネーム変更→更新→画像→削除
     assertEquals((await admin.storage.from("avatars").download(path2)).error, null);
 
     // イラストを選ぶと、アップロード画像が外れてファイルも消える
-    const icon = await updateProfileHandler(deps)(req("PATCH", token, { icon_key: "bear_01" }));
+    const icon = await updateProfileHandler(deps)(req("PATCH", token, { icon_key: "sun" }));
     assertEquals(icon.status, 200);
     const after = await admin.from("profiles").select("icon_key, avatar_path").eq("id", userId)
       .single();
-    assertEquals(after.data, { icon_key: "bear_01", avatar_path: null });
+    assertEquals(after.data, { icon_key: "sun", avatar_path: null });
     assert((await admin.storage.from("avatars").download(path2)).error !== null);
 
     // クライアント（利用者の権限）からは、avatars へ直接アップロードできない

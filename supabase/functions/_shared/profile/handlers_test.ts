@@ -20,7 +20,7 @@ import { DbError } from "./types.ts";
 const validCreate = {
   nickname: "はなこ",
   bio: "よろしくお願いします",
-  child_age_range: "0〜1歳",
+  child_age_range: "age_0_1",
   terms_version: "2026-10",
 };
 
@@ -48,7 +48,7 @@ Deno.test("登録：成功すると 201。規約版とチェック済みの本�
     userId: USER_ID,
     nickname: "はなこ",
     bio: "よろしくお願いします",
-    childAgeRange: "0〜1歳",
+    childAgeRange: "age_0_1",
     iconKey: null,
     termsVersion: "2026-10",
   }]);
@@ -205,15 +205,15 @@ Deno.test("更新：自己紹介は送信前チェックを通してから保存
 
 Deno.test("更新：イラストを選ぶと、アップロード画像を削除する", async () => {
   const f = makeFake({ avatarPath: `${USER_ID}/old.png` });
-  const res = await updateProfileHandler(f.deps)(jsonRequest("PATCH", { icon_key: "bear_01" }));
+  const res = await updateProfileHandler(f.deps)(jsonRequest("PATCH", { icon_key: "sun" }));
   assertEquals(res.status, 200);
-  assertEquals(f.calls.updateProfile, [{ icon_key: "bear_01" }]);
+  assertEquals(f.calls.updateProfile, [{ icon_key: "sun" }]);
   assertEquals(f.calls.removed, [`${USER_ID}/old.png`]);
 });
 
 Deno.test("更新：自己紹介の更新失敗時は旧画像を消さない", async () => {
   const f = makeFake({ avatarPath: `${USER_ID}/old.png`, dbError: new DbError("XX000") });
-  const res = await updateProfileHandler(f.deps)(jsonRequest("PATCH", { icon_key: "bear_01" }));
+  const res = await updateProfileHandler(f.deps)(jsonRequest("PATCH", { icon_key: "sun" }));
   assertEquals(res.status, 500);
   assertEquals(f.calls.removed, []);
 });
@@ -402,7 +402,7 @@ Deno.test("画像の削除：失敗しても操作は成功するが、削除待
 Deno.test("画像の削除：イラストへの変更・画像の削除（DELETE）でも、失敗したら削除待ちが残る", async () => {
   const a = makeFake({ avatarPath: `${USER_ID}/old.png`, removeFails: true });
   assertEquals(
-    (await updateProfileHandler(a.deps)(jsonRequest("PATCH", { icon_key: "bear_01" }))).status,
+    (await updateProfileHandler(a.deps)(jsonRequest("PATCH", { icon_key: "sun" }))).status,
     200,
   );
   assertEquals(a.state.pendingDeletions, [`${USER_ID}/old.png`]);
@@ -439,4 +439,24 @@ Deno.test("画像の回収：結び付けに失敗しても、画像を直接は
   // （結び付けに成功していた場合に、使用中の画像を消してしまわないため）
   assertEquals(f.state.reserved, [`${USER_ID}/fixed-id.png`]);
   assertEquals(f.calls.removed, []);
+});
+
+Deno.test("プロフィール更新：決まったアイコン・年齢帯以外をDBが拒否したら、422（内部の詳細は返さない）", async () => {
+  for (const code of ["23503", "23514"]) {
+    const f = makeFake({ dbError: new DbError(code) });
+    const res = await updateProfileHandler(f.deps)(jsonRequest("PATCH", { icon_key: "sun" }));
+    assertEquals(res.status, 422, code);
+    const body = await res.json();
+    assertEquals(body.error.code, "VALIDATION_FAILED", code);
+    assert(!JSON.stringify(body).includes(code), "応答にDBのコードが出ている");
+  }
+});
+
+Deno.test("プロフィール更新：決まっていない年齢帯は、DBに届く前に422", async () => {
+  const f = makeFake();
+  const res = await updateProfileHandler(f.deps)(
+    jsonRequest("PATCH", { child_age_range: "0〜1歳" }),
+  );
+  assertEquals(res.status, 422);
+  assertEquals(f.calls.updateProfile.length, 0);
 });

@@ -58,9 +58,15 @@ Deno.test("自己紹介：100文字まで。空は null", () => {
 });
 
 Deno.test("年齢帯・アイコン・規約版の形式", () => {
-  assertEquals(validateChildAgeRange("0〜1歳"), { ok: true, value: "0〜1歳" });
-  assertEquals(validateChildAgeRange("あ".repeat(21)).ok, false);
-  assertEquals(validateIconKey("bear_01"), { ok: true, value: "bear_01" });
+  for (const band of ["age_0_1", "age_2_3", "age_4_6", "elementary", "junior_high_plus"]) {
+    assertEquals(validateChildAgeRange(band), { ok: true, value: band }, band);
+  }
+  assertEquals(validateChildAgeRange(""), { ok: true, value: null });
+  assertEquals(validateChildAgeRange(null), { ok: true, value: null });
+  for (const bad of ["0〜1歳", "乳児", "age_7_9", " age_0_1", "AGE_0_1", 3]) {
+    assertEquals(validateChildAgeRange(bad).ok, false, String(bad));
+  }
+  assertEquals(validateIconKey("sun"), { ok: true, value: "sun" });
   assertEquals(validateIconKey("../etc/passwd").ok, false);
   assertEquals(validateIconKey("Bear").ok, false);
   assertEquals(validateTermsVersion("2026-10"), { ok: true, value: "2026-10" });

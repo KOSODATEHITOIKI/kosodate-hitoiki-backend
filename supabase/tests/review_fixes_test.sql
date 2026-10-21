@@ -26,7 +26,7 @@ WHERE id = '00000000-0000-0000-0000-0000000000f2';
 SELECT is((SELECT path FROM public.pending_storage_deletions), '00000000-0000-0000-0000-0000000000f2/old.png',
   '画像を差し替えると、古い画像が削除待ちに記録される');
 
-UPDATE public.profiles SET avatar_path = NULL, icon_key = 'bear' WHERE id = '00000000-0000-0000-0000-0000000000f2';
+UPDATE public.profiles SET avatar_path = NULL, icon_key = 'sun' WHERE id = '00000000-0000-0000-0000-0000000000f2';
 SELECT is((SELECT count(*)::int FROM public.pending_storage_deletions WHERE path = '00000000-0000-0000-0000-0000000000f2/new.png'), 1,
   'イラストに変えて画像を外したときも、画像が削除待ちに記録される（パスが消えて画像だけ残らない）');
 

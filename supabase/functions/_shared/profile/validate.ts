@@ -11,7 +11,14 @@ export type Validated<T> =
 export const NICKNAME_MIN = 2;
 export const NICKNAME_MAX = 12;
 export const BIO_MAX = 100;
-const CHILD_AGE_RANGE_MAX = 20;
+/** 子どもの年齢帯の選択肢（運営が決定・2026-10-21。DBの check 制約と同じ。変えるときは、移行と同時に直す）。 */
+export const CHILD_AGE_RANGES = [
+  "age_0_1",
+  "age_2_3",
+  "age_4_6",
+  "elementary",
+  "junior_high_plus",
+] as const;
 const ICON_KEY_PATTERN = /^[a-z0-9_-]{1,40}$/;
 const TERMS_VERSION_MAX = 40;
 
@@ -60,16 +67,16 @@ export function validateBio(input: unknown): Validated<string | null> {
   return { ok: true, value: bio };
 }
 
-/** 選択肢（年齢帯）は未決定のため、長さだけ検証する。確定後にenum化する。 */
+/** 年齢帯は、決まった選択肢だけ（任意。空・nullは未選択）。 */
 export function validateChildAgeRange(input: unknown): Validated<string | null> {
   if (input === undefined || input === null || input === "") return { ok: true, value: null };
-  if (typeof input !== "string" || graphemeCount(input.trim()) > CHILD_AGE_RANGE_MAX) {
-    return fail("child_age_range", "子どもの年齢帯の形式が正しくありません。", CHILD_AGE_RANGE_MAX);
+  if (typeof input !== "string" || !(CHILD_AGE_RANGES as readonly string[]).includes(input)) {
+    return fail("child_age_range", "子どもの年齢帯の指定が正しくありません。");
   }
-  return { ok: true, value: input.trim() };
+  return { ok: true, value: input };
 }
 
-/** イラストのマスタは未決定のため、形式だけ検証する。確定後にマスタと照合する。 */
+/** アイコンは、形式だけをここで確かめる。決まったアイコン（profile_icons）との照合は、DBの外部キーが行う。 */
 export function validateIconKey(input: unknown): Validated<string | null> {
   if (input === undefined || input === null || input === "") return { ok: true, value: null };
   if (typeof input !== "string" || !ICON_KEY_PATTERN.test(input)) {

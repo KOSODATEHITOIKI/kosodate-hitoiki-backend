@@ -46,7 +46,7 @@ fi
 
 echo "== 2. 機密テーブル・ビュー・列を、未ログインで読めないこと =="
 before=$FAILED
-SENSITIVE="profiles comments reactions saved_posts hidden_items blocks muted_topics muted_words notifications notification_settings push_devices push_deliveries reports moderation_actions account_restrictions admin_users admin_report_queue app_settings app_settings_history nickname_reservations terms_acceptances idempotency_keys write_events request_budget pending_storage_deletions deletion_ledger public_profiles my_blocks member_posts feed_posts member_comments my_posts saved_post_list"
+SENSITIVE="profiles comments reactions saved_posts hidden_items blocks muted_topics muted_words notifications notification_settings push_devices push_deliveries reports moderation_actions account_restrictions admin_users admin_report_queue app_settings app_settings_history nickname_reservations terms_acceptances idempotency_keys write_events request_budget pending_storage_deletions deletion_ledger public_profiles my_blocks profile_icons member_posts feed_posts member_comments my_posts saved_post_list"
 for t in $SENSITIVE; do
   c=$(code "${H[@]}" "$API_URL/rest/v1/$t?limit=1")
   case "$c" in 401|403|404) ;; *) ng "$t が未ログインで応答した（HTTP $c）" ;; esac

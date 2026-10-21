@@ -92,13 +92,14 @@ Authorization: Bearer <token>
 {
   "nickname": "はなこ",
   "bio": "よろしくお願いします",
-  "child_age_range": "0〜1歳",
+  "child_age_range": "age_0_1",
   "icon_key": null,
   "terms_version": "2026-10",
   "confirmed": false
 }
 ```
 
+- `icon_key`は、決まった6つのどれか（`sun`・`sprout`・`little_bird`・`yellow_flower`・`tulip`・`blue_flowers`）またはnull。`child_age_range`は、いちばん下のお子さんの年齢帯で、`age_0_1`（0〜1歳）・`age_2_3`（2〜3歳）・`age_4_6`（4〜6歳・未就学）・`elementary`（小学生）・`junior_high_plus`（中学生以上）のどれか、またはnull。**どちらも、決まった値以外は`422 VALIDATION_FAILED`**。画面に出す名前は、アプリが持つ（コードと名前を分けてあるので、言い方を変えても、保存済みのデータは壊れない）。
 - ニックネーム2〜12文字（絵文字等も1文字、全角・半角はNFKC後に数える）、自己紹介100文字まで。ニックネーム・自己紹介は送信前チェックを通す（`confirmed: true`で確認後の再送）。`terms_version`は必須（利用規約への同意を記録）。
 - 成功：新規作成は`201`、同じ内容の再送（作成済み）は`200`。レスポンス`{ "id": "<user_id>", "support_notice": false }`。`support_notice`は本人にだけ相談先を案内するためのフラグ。
 - 別のニックネームで作成済みなら`409 CONFLICT`。他の人が使用中の名前は`409 CONFLICT`、旧名の予約中は`422 VALIDATION_FAILED`。
@@ -109,7 +110,7 @@ Authorization: Bearer <token>
 ```http
 PATCH /functions/v1/profile-update
 Authorization: Bearer <token>
-{ "bio": "更新しました", "child_age_range": "2〜3歳", "icon_key": "bear_01" }
+{ "bio": "更新しました", "child_age_range": "age_2_3", "icon_key": "sprout" }
 ```
 
 指定した項目だけ更新する（空の更新は`422`）。自己紹介は送信前チェックを通す。`icon_key`（イラスト）を選ぶと、アップロード画像は外れてファイルも削除される（どちらか一方）。
