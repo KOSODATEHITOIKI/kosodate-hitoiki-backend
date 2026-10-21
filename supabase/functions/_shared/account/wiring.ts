@@ -1,20 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
+import { verifiedUser } from "../auth.ts";
 import { type AccountDb, type AccountDeps, type AccountStorage, toAccountError } from "./types.ts";
-
-/** JWTの本体（payload）を読む。署名の検証は getUser で済ませたトークンにだけ使う。 */
-function readPayload(token: string): Record<string, unknown> {
-  const part = token.split(".")[1] ?? "";
-  const base64 = part.replace(/-/g, "+").replace(/_/g, "/").padEnd(
-    Math.ceil(part.length / 4) * 4,
-    "=",
-  );
-  try {
-    const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-    return JSON.parse(new TextDecoder().decode(bytes));
-  } catch {
-    return {};
-  }
-}
 
 /** 実際のSupabase（service_role）へ接続する配線。ロジックは handlers.ts とDB関数にある。 */
 export function createAccountDeps(): AccountDeps {
@@ -55,22 +41,20 @@ export function createAccountDeps(): AccountDeps {
 
   return {
     async authenticate(req) {
-      const match = /^Bearer (.+)$/i.exec(req.headers.get("Authorization") ?? "");
-      if (!match) return null;
-      const { data, error } = await admin.auth.getUser(match[1]);
-      if (error || !data.user) return null;
+      const user = await verifiedUser(admin, req);
+      if (!user) return null;
       // セッションIDは、Supabase Authが検証したトークンのクレームから読む（クライアントの自己申告ではない）。
-      const sessionId = readPayload(match[1]).session_id;
+      const sessionId = user.claims.session_id;
       let sessionStartedAt: string | null = null;
       if (typeof sessionId === "string") {
         const { data: started, error: e2 } = await admin.rpc("session_started_at", {
           p_session_id: sessionId,
-          p_user_id: data.user.id,
+          p_user_id: user.userId,
         });
         if (e2) throw new Error("database error");
         sessionStartedAt = typeof started === "string" ? started : null;
       }
-      return { userId: data.user.id, sessionStartedAt };
+      return { userId: user.userId, sessionStartedAt };
     },
     db,
     storage,

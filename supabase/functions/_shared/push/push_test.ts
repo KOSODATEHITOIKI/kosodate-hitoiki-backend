@@ -337,3 +337,67 @@ Deno.test("FCM：ネットワーク失敗・トークン交換の失敗は再試
   );
   assertEquals(await noAuth.send(job()), { outcome: "retry", errorCode: "FCM_AUTH" });
 });
+
+Deno.test("FCM：応答が返らない通信は、期限で打ち切り、再試行にする（後続の配信を止めない）", async () => {
+  const { account } = await makeAccount();
+  /** 応答を返さず、中断の合図だけに反応する通信。 */
+  const hang = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> =>
+    new Promise((_resolve, reject) => {
+      void input;
+      init?.signal?.addEventListener(
+        "abort",
+        () => reject(new DOMException("aborted", "AbortError")),
+      );
+    });
+
+  // トークンの交換が返らない
+  const stuckAuth = createFcmSender(account, hang, () => 1_800_000_000_000, 30);
+  const t0 = Date.now();
+  assertEquals(await stuckAuth.send(job()), { outcome: "retry", errorCode: "FCM_AUTH" });
+  assert(Date.now() - t0 < 2000, "期限で打ち切れていない");
+
+  // 送信が返らない（トークンは取れる）
+  const stuckSend = createFcmSender(
+    account,
+    (input, init) =>
+      String(input).includes("oauth2")
+        ? Promise.resolve(new Response(JSON.stringify({ access_token: "a" }), { status: 200 }))
+        : hang(input, init),
+    () => 1_800_000_000_000,
+    30,
+  );
+  assertEquals(await stuckSend.send(job()), { outcome: "retry", errorCode: "FCM_NETWORK" });
+
+  // 応答の本文の読み取りが返らなくても、打ち切る（ヘッダーは返るが、本文が止まる）
+  const stuckBody = createFcmSender(
+    account,
+    (input, init) => {
+      if (String(input).includes("oauth2")) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ access_token: "a" }), { status: 200 }),
+        );
+      }
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          init?.signal?.addEventListener(
+            "abort",
+            () => controller.error(new DOMException("aborted", "AbortError")),
+          );
+        },
+      });
+      return Promise.resolve(new Response(stream, { status: 503 }));
+    },
+    () => 1_800_000_000_000,
+    30,
+  );
+  const r = await stuckBody.send(job());
+  assertEquals(r.outcome, "retry");
+});
+
+Deno.test("FCM：通信には、期限つきの中断の合図（signal）を付けている", async () => {
+  const { account } = await makeAccount();
+  const f = fakeFetch(200);
+  await createFcmSender(account, f.fn, () => 1_800_000_000_000).send(job());
+  assert(f.calls.length >= 2);
+  for (const c of f.calls) assert(c.init?.signal instanceof AbortSignal, c.url);
+});

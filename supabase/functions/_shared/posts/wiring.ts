@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
+import { verifiedUser } from "../auth.ts";
 import { callModeration } from "../moderation/openai.ts";
 import { type PostsDb, type PostsDeps, toRuleError } from "./types.ts";
 
@@ -81,10 +82,7 @@ export function createPostsDeps(): PostsDeps {
 
   return {
     async authenticate(req) {
-      const match = /^Bearer (.+)$/i.exec(req.headers.get("Authorization") ?? "");
-      if (!match) return null;
-      const { data, error } = await admin.auth.getUser(match[1]);
-      return error || !data.user ? null : data.user.id;
+      return (await verifiedUser(admin, req))?.userId ?? null;
     },
     moderation: { moderate: (text) => callModeration(text, openAi) },
     db,
