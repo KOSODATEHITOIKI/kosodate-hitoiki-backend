@@ -1,0 +1,48 @@
+# 依存ライブラリ・実行環境の更新を、週1回、自動でPRにする（docs/運用手順.md）。
+# 設定ファイルは、デフォルトブランチ（main）にあるものだけが読まれる。初回リリースまでは main にないため、
+# リリースで main に入ってから動き始める。それまでは、月1回の手動確認で補う。
+# PRの宛先は、Git Flowに合わせて develop にする。マージは、CIが通ったあとに管理者が判断する（自動マージはしない）。
+version: 2
+updates:
+  # npm：markdownlint・Prettier・Supabase CLI・Deno（package.json）
+  - package-ecosystem: npm
+    directory: /
+    target-branch: develop
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 5
+    groups:
+      dev-tools:
+        update-types: [minor, patch]
+
+  # GitHub Actions：ワークフローが使うアクション（コミットのハッシュで固定してあるものも更新する）
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: develop
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        update-types: [minor, patch]
+
+  # Docker：Supabaseなしの検証に使う素のPostgres（infra/portable/Dockerfile）。
+  # 本番はSupabaseのPostgresなので、メジャーバージョン（17→18）は、本番に合わせて手動で判断する。
+  - package-ecosystem: docker
+    directory: /infra/portable
+    target-branch: develop
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 2
+    ignore:
+      - dependency-name: postgres
+        update-types: [version-update:semver-major]
