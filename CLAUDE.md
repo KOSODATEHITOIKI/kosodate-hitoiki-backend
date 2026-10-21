@@ -4,7 +4,7 @@
 
 ## このリポジトリについて
 
-kosodate-hitoiki（子育てのぐち・相談・コツや体験談を共有するSNS、Flutter製）のバックエンド。Supabase（DB・RLS・Edge Functions）を管理する。フロントエンドは別リポジトリ [kosodate-hitoiki](https://github.com/naka328/kosodate-hitoiki)。
+kosodate-hitoiki（子育てのぐち・相談・コツや体験談を共有するSNS、Flutter製）のバックエンド。Supabase（DB・RLS・Edge Functions）を管理する。フロントエンドは別リポジトリ [kosodate-hitoiki](https://github.com/KOSODATEHITOIKI/kosodate-hitoiki)。
 
 現状はDBスキーマ・RLS・DBテスト（Issue #10）、送信前チェックの共通モジュール（#11）、プロフィール系のEdge Functions（#12）、投稿・コメント・返信のAPI（#13）、ブロック・非表示・ミュートの取得への適用（#14）、共感・保存（#15）、投稿の検索（#16）、通報・運営の対処（#17）、登録直後の投稿頻度制限・新規登録の停止（#18）、通知・プッシュ配信の基盤（#19）、退会・保持期限の削除（#20）まで実装済み。バックアップ・復旧・監視（#21）は実装済み（クラウドでの初期設定と復元試験は手作業が残る）。Flutter連携（#22）は、準備（結合ガイド）まで。フロントの接続と受入試験は未着手。進捗の正は親Issue #6のチェックリスト。
 
@@ -12,7 +12,7 @@ kosodate-hitoiki（子育てのぐち・相談・コツや体験談を共有す�
 
 1. **[Notion要件定義書](https://app.notion.com/p/3e95b8f5ffee8171bf86f976d5d5b2ec)** が仕様の一次情報。
 2. 本リポジトリの`docs/`が、Notionの決定事項をバックエンド実装の観点で整理したもの。Notionと矛盾する場合は[未決事項.md](docs/未決事項.md)に記録し、無断で判断しない。
-3. GitHub Issue（特に親Issue [#6](https://github.com/nakayu206/kosodate-hitoiki-backend/issues/6)）が実装工程と依存関係を管理する。
+3. GitHub Issue（特に親Issue [#6](https://github.com/KOSODATEHITOIKI/kosodate-hitoiki-backend/issues/6)）が実装工程と依存関係を管理する。
 
 `docs/`配下は共通の書式を使う：**決定済み**＝資料で明示的に決まった要件、**設計案**＝実現方法の提案（採用確定ではない）、**未決定**＝判断が残るもの。この3つを混同しない。特に**未決定のまま実装しない**（推奨案があっても、ユーザーの判断を得るまで確定事項として扱わない）。
 
@@ -38,7 +38,7 @@ kosodate-hitoiki（子育てのぐち・相談・コツや体験談を共有す�
 
 ## ブランチ・PR・Issueの運用
 
-姉妹リポジトリ（kosodate-hitoiki本体）の[環境とブランチ運用ガイド](https://github.com/nakayu206/kosodate-hitoiki/blob/main/docs/環境とブランチ運用.md)に合わせ、**Git Flow**を採用する。
+姉妹リポジトリ（kosodate-hitoiki本体）の[環境とブランチ運用ガイド](https://github.com/KOSODATEHITOIKI/kosodate-hitoiki/blob/main/docs/環境とブランチ運用.md)に合わせ、**Git Flow**を採用する。
 
 ```text
 main                  ← リリース済みの状態のみ
