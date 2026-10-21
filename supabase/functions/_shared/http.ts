@@ -24,6 +24,27 @@ export function errorResponse(
   return jsonResponse(status, { error: { code, message, details } });
 }
 
+/**
+ * ハンドラーの最も外側に付けて、想定外の例外（Authへの問い合わせの失敗など、各ハンドラーのtryの外で起きるもの）を、
+ * どの機能でも同じ500にそろえる。内部の詳細・本文・鍵は返さず、ログにも例外の種類（名前）だけを残す。
+ */
+export function guarded(
+  handler: (req: Request) => Promise<Response>,
+): (req: Request) => Promise<Response> {
+  return async (req) => {
+    try {
+      return await handler(req);
+    } catch (e) {
+      console.error("unhandled error in function", e instanceof Error ? e.name : "unknown");
+      return errorResponse(
+        500,
+        "INTERNAL_ERROR",
+        "処理に失敗しました。しばらくしてからもう一度お試しください。",
+      );
+    }
+  };
+}
+
 /** ブラウザ（Flutter web）からのプリフライト。それ以外は null。 */
 export function preflight(req: Request): Response | null {
   return req.method === "OPTIONS"

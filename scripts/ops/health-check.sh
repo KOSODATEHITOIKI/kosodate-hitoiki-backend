@@ -18,7 +18,14 @@ STORAGE_PENDING_WARN="${STORAGE_PENDING_WARN:-1}"  # 削除待ちで、5回以�
 PUSH_FAILED_WARN="${PUSH_FAILED_WARN:-20}"         # 24時間のプッシュ配信の失敗数
 
 warn=0
+failed_query=0
 check() { # check <ラベル> <値> <しきい値> <説明>
+  # 値が数でない（空・エラー）は、DBへの問い合わせの失敗。「正常」と取り違えず、失敗として扱う。
+  if ! [[ "$2" =~ ^[0-9]+$ ]]; then
+    echo "ERROR - $1：値を取得できませんでした（DBへの接続・権限・SQLの失敗の可能性）" >&2
+    failed_query=1
+    return
+  fi
   if [ "$2" -ge "$3" ]; then
     echo "WARN  - $1：$2（しきい値 $3）$4"
     warn=1
@@ -26,7 +33,8 @@ check() { # check <ラベル> <値> <しきい値> <説明>
     echo "ok    - $1：$2（しきい値 $3）"
   fi
 }
-q() { db_psql SRC -c "$1"; }
+# 失敗したときは、何も出力せず（空）、理由は標準エラーへ。呼び出し側（check）が、数でない値を失敗として扱う。
+q() { db_psql SRC -c "$1" || true; }
 
 check "DBの容量（MB）" "$(q "select (pg_database_size(current_database()) / 1024 / 1024)::int")" "$DB_SIZE_WARN_MB" \
   "→ 無料枠の上限に近い。古いデータの整理か、プランの見直しを検討"
@@ -52,9 +60,24 @@ check "保持期限（35日）を過ぎても残っている台帳の行" \
   "→ 保持期限を過ぎた台帳が残っている（毎日の掃除が止まっている可能性）"
 
 # 毎日の掃除（pg_cron）が動いているか：最近の実行の失敗数。cronスキーマを読めない権限では飛ばす。
-if [ "$(q "select to_regclass('cron.job_run_details') is not null")" = "t" ]; then
-  failed=$(q "select count(*) from cron.job_run_details where status = 'failed' and start_time > now() - interval '48 hours'" 2>/dev/null || echo "")
-  if [ -n "$failed" ]; then check "48時間の定期実行（pg_cron）の失敗数" "$failed" 1 "→ 共感のまとめ通知・期限切れの削除などが失敗している"; fi
+has_cron="$(q "select to_regclass('cron.job_run_details') is not null")"
+case "$has_cron" in
+  t)
+    failed=$(q "select count(*) from cron.job_run_details where status = 'failed' and start_time > now() - interval '48 hours'" 2>/dev/null)
+    if [[ "$failed" =~ ^[0-9]+$ ]]; then
+      check "48時間の定期実行（pg_cron）の失敗数" "$failed" 1 "→ 共感のまとめ通知・期限切れの削除などが失敗している"
+    else
+      echo "skip  - 48時間の定期実行（pg_cron）の失敗数：読み取れないので確認を飛ばした（読み取り専用の権限では、cronスキーマを読めない）"
+    fi
+    ;;
+  f) echo "skip  - 定期実行（pg_cron）の確認：cronスキーマがない環境" ;;
+  *) echo "ERROR - 定期実行（pg_cron）の有無を確認できませんでした（DBへの問い合わせの失敗の可能性）" >&2; failed_query=1 ;;
+esac
+
+# DBに問い合わせられなかった項目があれば、「正常」とは言わず、失敗にする（監視が止まっていることに、気づけるように）。
+if [ "$failed_query" = 1 ]; then
+  echo "DBへの問い合わせに失敗した項目があります。接続文字列・権限・DBの状態を確認してください" >&2
+  exit 1
 fi
 
 if [ "$warn" = 1 ]; then

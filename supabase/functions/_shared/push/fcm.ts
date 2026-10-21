@@ -41,11 +41,19 @@ export function parseServiceAccount(json: string | undefined): ServiceAccount | 
   return null;
 }
 
+/**
+ * 外部通信（トークンの交換・FCMへの送信）1回あたりの待ち時間の上限。応答が返らない通信が、同じバッチの後続の配信と、
+ * 結果の記録を止めないようにする（実行環境に強制終了されると、再試行の結果を記録できない）。
+ * AbortSignal.timeout は、応答の本文を読んでいる間も効く。
+ */
+export const FCM_TIMEOUT_MS = 8000;
+
 /** サービスアカウントの鍵でJWTを作り、アクセストークンと交換する。有効期間内は使い回す。 */
 function createTokenSource(
   account: ServiceAccount,
   fetchFn: typeof fetch,
   nowMs: () => number,
+  timeoutMs: number,
 ) {
   let cached: { token: string; expiresAt: number } | null = null;
 
@@ -78,6 +86,7 @@ function createTokenSource(
         grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
         assertion,
       }),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok) throw new Error("token exchange failed");
     const data = await res.json();
@@ -148,8 +157,9 @@ export function createFcmSender(
   account: ServiceAccount,
   fetchFn: typeof fetch = fetch,
   nowMs: () => number = Date.now,
+  timeoutMs: number = FCM_TIMEOUT_MS,
 ): PushSender {
-  const tokens = createTokenSource(account, fetchFn, nowMs);
+  const tokens = createTokenSource(account, fetchFn, nowMs, timeoutMs);
   const clearToken = () => tokens.clear();
 
   return {
@@ -185,6 +195,7 @@ export function createFcmSender(
                 },
               },
             }),
+            signal: AbortSignal.timeout(timeoutMs),
           },
         );
       } catch {

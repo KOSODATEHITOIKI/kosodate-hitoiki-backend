@@ -71,6 +71,8 @@ jobs:
         run: npm run supabase:start
       - name: Run pgTAP database tests
         run: npx supabase test db
+      - name: Check the monitoring script (normal, DB unreachable, over threshold)
+        run: bash scripts/ops/test-health-check.sh
       - name: Run concurrency tests
         run: npm run test:concurrency
       # Denoの実行ファイルはnpmのpostinstallで取得する（上のnpm ciは--ignore-scripts）。
