@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="ja">
+  <body style="margin:0;padding:24px;background:#fbf7f0;font-family:-apple-system,BlinkMacSystemFont,'Hiragino Sans','Yu Gothic',Meiryo,sans-serif;color:#3a3329;line-height:1.8;">
+    <div style="max-width:480px;margin:0 auto;background:#ffffff;border-radius:12px;padding:28px 24px;">
+      <p style="margin:0 0 4px;font-size:13px;color:#8a7f70;">ひと息</p>
+      <h1 style="margin:0 0 16px;font-size:20px;">メールアドレス変更の確認</h1>
+      <p style="margin:0 0 12px;">メールアドレスを、{{ .Email }} から {{ .NewEmail }} に変更するご依頼を受け付けました。<br />下のボタンを押すと、変更が完了します。</p>
+      <p style="margin:24px 0;text-align:center;">
+        <a href="{{ .ConfirmationURL }}" style="display:inline-block;padding:12px 28px;background:#e8963c;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:bold;">メールアドレスの変更を確認する</a>
+      </p>
+      <p style="margin:0 0 16px;font-size:13px;color:#8a7f70;">ボタンが押せないときは、次のURLをブラウザーに貼り付けてください。<br /><span style="word-break:break-all;">{{ .ConfirmationURL }}</span></p>
+      <p style="margin:16px 0 0;font-size:13px;color:#8a7f70;">このメールに心当たりがない場合は、何もせずに破棄し、パスワードを変更してください。</p>
+    </div>
+  </body>
+</html>

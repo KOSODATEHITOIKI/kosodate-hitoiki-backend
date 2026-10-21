@@ -243,16 +243,31 @@ otp_expiry = 3600
 # admin_email = "admin@email.com"
 # sender_name = "Admin"
 
-# Uncomment to customize email template
+# 認証メールの日本語テンプレート（docs/認証設定.md）。
+# リモート（dev・prod）には自動では反映されない。ダッシュボードの Authentication > Emails へ、同じ内容を貼る。
+# 「再設定リンクの有効時間」「再送間隔」は未決定なので、文面には書かない（上の otp_expiry・max_frequency も初期値のまま）。
+[auth.email.template.confirmation]
+subject = "【ひと息】メールアドレスの確認"
+content_path = "./supabase/templates/confirmation.html"
+
+[auth.email.template.recovery]
+subject = "【ひと息】パスワードの再設定"
+content_path = "./supabase/templates/recovery.html"
+
+[auth.email.template.email_change]
+subject = "【ひと息】メールアドレス変更の確認"
+content_path = "./supabase/templates/email_change.html"
+
+# 招待・マジックリンク・再認証は使わない（初期値のまま）。
 # [auth.email.template.invite]
 # subject = "You have been invited"
 # content_path = "./supabase/templates/invite.html"
 
-# Uncomment to customize notification email template
-# [auth.email.notification.password_changed]
-# enabled = true
-# subject = "Your password has been changed"
-# content_path = "./supabase/templates/password_changed_notification.html"
+# パスワードを変更したことを、本人のメールへ知らせる（乗っ取りに気づけるようにする）。
+[auth.email.notification.password_changed]
+enabled = true
+subject = "【ひと息】パスワードを変更しました"
+content_path = "./supabase/templates/password_changed_notification.html"
 
 [auth.sms]
 # Allow/disallow new user signups via SMS to your project.
