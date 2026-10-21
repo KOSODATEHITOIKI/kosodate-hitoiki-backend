@@ -6,9 +6,9 @@
 
 ## 関連資料
 
-- [フロントエンド（Flutter）](https://github.com/nakayu206/kosodate-hitoiki)
+- [フロントエンド（Flutter）](https://github.com/KOSODATEHITOIKI/kosodate-hitoiki)
 - [Notion 要件定義書](https://app.notion.com/p/3e95b8f5ffee8171bf86f976d5d5b2ec)：仕様の一次情報
-- [フロントエンド 全体設計書](https://github.com/nakayu206/kosodate-hitoiki/blob/main/docs/全体設計書.md)
+- [フロントエンド 全体設計書](https://github.com/KOSODATEHITOIKI/kosodate-hitoiki/blob/main/docs/全体設計書.md)
 - [バックエンド設計](docs/バックエンド設計.md)：担当範囲、権限、処理の境界
 - [データ設計案](docs/データ設計案.md)：データの関係、制約、削除方針（経緯の記録）
 - [スキーマ定義](docs/スキーマ定義.md)：確定したテーブル定義・ER概要
