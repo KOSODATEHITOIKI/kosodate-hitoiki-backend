@@ -158,6 +158,17 @@ Authorization: Bearer <token>
 
 ## 3. 投稿
 
+### マスタ（定型文・話題）の取得（未ログイン可）
+
+```http
+GET /rest/v1/reaction_types?select=id,code,label,sort_order&is_active=eq.true&order=sort_order
+GET /rest/v1/topics?select=id,label,sort_order&is_active=eq.true&order=sort_order
+```
+
+- 運営が用意した、共感の定型文と、投稿の話題。**未ログインでも読める**（書き込みは運営だけ）。`is_active`がfalseのものは、新しく選べない（過去の共感・投稿には残る）。
+- 定型文の`code`は、画面のアイコンと結びつける固定の名前（文言を直しても変わらない）。**共感は、定型文から1人1つ選ぶ**（`PUT /functions/v1/posts/{id}/reaction`、5節）。「共感ボタン」は、`empathy`（わかる）をそのまま押す形にする（フロントの扱い）。
+- 話題は、投稿に1つ付けられる（任意）。「その他」はなく、話題を付けないことで表す（`topic_id`をnull）。
+
 ### 一覧取得（未ログイン可）
 
 ```http
