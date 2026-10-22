@@ -71,4 +71,12 @@ else
   ng "元に戻したのに、失敗した（終了コード $code）"; echo "$out" | grep -E "^FAIL" | head -5
 fi
 
+# ログインに失敗したときは、原因（Authのエラーコード）を出し、パスワード・メールアドレスは出さない
+out=$(API_URL="$API_URL" ANON_KEY="$ANON_KEY" EMAIL_A="$EA" PASSWORD_A="$PW" EMAIL_B="$EB" PASSWORD_B="wrong-$PW" node scripts/ops/check-authenticated.mjs 2>&1); code=$?
+if [ "$code" = 1 ] && grep -q "^FAIL - アカウントBでログインできない（HTTP 400、invalid_credentials）" <<<"$out"    && grep -q "Bにログインできなかったので" <<<"$out" && ! grep -qF "$PW" <<<"$out" && ! grep -qF "$EB" <<<"$out"; then
+  ok "ログインに失敗したら、原因を示して失敗する（パスワード・メールアドレスは出さない）"
+else
+  ng "ログイン失敗の表示が想定外（終了コード $code）"; echo "$out" | grep -E "^(FAIL|info)" | head -3
+fi
+
 [ "$failed" = 0 ] && echo "ログイン済みの確認スクリプトの検証：すべて想定どおり" || { echo "ログイン済みの確認スクリプトの検証：想定外があります"; exit 1; }

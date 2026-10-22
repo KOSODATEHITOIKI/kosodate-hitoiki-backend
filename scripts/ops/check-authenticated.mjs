@@ -73,14 +73,30 @@ async function call(method, path, { token, body, headers = {}, raw = false } = {
   return { status: res.status, json, text };
 }
 
+/**
+ * ログインする。失敗したときは、原因を調べられるよう、HTTPの状態とAuthのエラーコードだけを返す
+ * （invalid_credentials・email_not_confirmed など。メールアドレス・パスワード・応答の本文は出さない）。
+ */
 async function signIn(who) {
   const r = await call("POST", "/auth/v1/token?grant_type=password", {
     body: { email: who.email, password: who.password },
   });
   const token = r.json?.access_token;
   const userId = r.json?.user?.id;
-  if (r.status !== 200 || !token || !userId) return null;
+  if (r.status !== 200 || !token || !userId) {
+    const code = typeof r.json?.error_code === "string" ? r.json.error_code : "unknown";
+    return { failure: `HTTP ${r.status}、${code}` };
+  }
   return { token, userId };
+}
+
+/** ログインできなかった理由の、案内（コードごと）。 */
+function loginHint(failure) {
+  if (failure.includes("invalid_credentials")) return "パスワードの打ち間違い、またはメールアドレスが違う、アカウントが存在しない可能性";
+  if (failure.includes("email_not_confirmed")) return "メールの確認が済んでいない（作成時に Auto Confirm User を入れ忘れた）可能性";
+  if (failure.includes("user_banned")) return "アカウントが停止されている";
+  if (failure.includes("over_request_rate_limit") || failure.includes("429")) return "ログインの試行が多すぎる。しばらく待つ";
+  return "Authの設定・接続先（API_URL）・公開キー（ANON_KEY）を確認";
 }
 
 const DENIED = [401, 403, 404];
@@ -88,20 +104,25 @@ const isDenied = (r) => DENIED.includes(r.status);
 const isEmpty = (r) => r.status === 200 && Array.isArray(r.json) && r.json.length === 0;
 
 console.log("== 1. ログイン ==");
-const a = await signIn(A);
+const aLogin = await signIn(A);
+const a = aLogin.failure ? null : aLogin;
 if (!a) {
-  ng("アカウントAでログインできない（メール確認の済んでいない・パスワード違い・Authの設定）");
+  ng(`アカウントAでログインできない（${aLogin.failure}）。${loginHint(aLogin.failure)}`);
   console.log("\nログイン済みの確認：続けられません");
   process.exit(1);
 }
 ok("アカウントAでログインできる");
 let b = null;
 if (B.email && B.password) {
-  b = await signIn(B);
-  if (b) ok("アカウントBでログインできる");
-  else ng("アカウントBでログインできない");
+  const bLogin = await signIn(B);
+  if (!bLogin.failure) {
+    b = bLogin;
+    ok("アカウントBでログインできる");
+  } else {
+    ng(`アカウントBでログインできない（${bLogin.failure}）。${loginHint(bLogin.failure)}`);
+  }
 } else {
-  info("EMAIL_B・PASSWORD_B がないので、2人の間の確認（5）は飛ばします");
+  info("EMAIL_B・PASSWORD_B がないので、2人の間の確認（7）は飛ばします");
 }
 
 console.log("== 2. 他人・運営専用・内部専用のデータが、ログインしても読めないこと ==");
@@ -321,6 +342,8 @@ if (b) {
   } else {
     ng(`AがBをブロックできない（HTTP ${ins.status}）。本人用のRLSの確認が必要`);
   }
+} else if (B.email && B.password) {
+  info("（Bにログインできなかったので、2人の間の確認は、できていません。Bを直して、もう一度実行してください）");
 } else {
   info("（2人目がないので飛ばしました）");
 }
