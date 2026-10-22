@@ -58,7 +58,7 @@
 
 | 項目 | 状態 |
 |---|---|
-| OAuthの戻り先（ディープリンク） | モバイルで、Google・Appleのログイン後にアプリへ戻る設定が必要。Supabaseの「Redirect URLs」と、アプリ側のURLスキームをそろえる（[認証設定](認証設定.md)）。**未確認** |
+| OAuthの戻り先（ディープリンク） | **決定（2026-10-22、運営）：`kosodatehitoiki://auth-callback`**。Supabaseの「Redirect URLs」に登録済み（管理者の報告。prodは、リリース時に同じ値を登録）。アプリ側は実装済み（フロント PR #112）。パスワード再設定・Googleログインの通しの確認は、これから（[認証設定](認証設定.md)） |
 | Apple ログイン | **フェーズ2**（決定済み）。**iOSのApp Store審査では、Googleなどの外部ログインを出す場合、Appleでサインインの提供が求められる場合がある**ため、iOSのリリース時期に影響する。リリース前に、審査の要件を確認する |
 | メール送信（SMTP） | 本番は、Supabase標準のメール送信に回数の制限があるため、**専用の送信サービスが必要**。**決定（2026-10-22）：Resend＋独自ドメイン`kosodate-hitoiki.com`**。dev：設定済み（日本語の確認メールが届く）。prod：リリース時に設定 |
 | FCM（Firebase） | プッシュを使うとき。`FCM_SERVICE_ACCOUNT_JSON`をEdge Functionsのシークレットに登録（[運用手順](運用手順.md)） |
