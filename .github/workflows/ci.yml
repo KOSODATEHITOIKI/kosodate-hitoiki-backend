@@ -71,8 +71,10 @@ jobs:
         run: npm run supabase:start
       - name: Run pgTAP database tests
         run: npx supabase test db
-      - name: Check the monitoring script (normal, DB unreachable, over threshold)
+      - name: Check the monitoring script (normal, DB unreachable, over threshold, attack signals)
         run: bash scripts/ops/test-health-check.sh
+      - name: Check the read-only DB role (RLS bypass, pg_dump, read-only)
+        run: bash scripts/ops/test-backup-role.sh
       - name: Check the logged-in exposure script (normal, holes are detected)
         run: bash scripts/ops/test-check-authenticated.sh
       - name: Run concurrency tests

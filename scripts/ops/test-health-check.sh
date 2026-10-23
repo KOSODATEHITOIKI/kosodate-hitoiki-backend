@@ -33,4 +33,14 @@ else
   ng "しきい値を超えたのに、失敗として扱われていない（終了コード $code）"; echo "$out" | tail -5
 fi
 
+# 侵入・荒らしの兆候の項目が、しきい値で、それぞれ検出されること（ローカルは、0件なので、しきい値を0にして確かめる）
+for var in SIGNUPS_24H_WARN NEW_ADMINS_24H_WARN SETTING_CHANGES_24H_WARN MODERATION_24H_WARN DELETIONS_24H_WARN; do
+  out=$(env SRC_DB_CONTAINER="$DB" "$var=0" bash ./health-check.sh 2>&1); code=$?
+  if [ "$code" = 1 ] && [ "$(grep -c '^WARN' <<<"$out")" = 1 ]; then
+    ok "兆候の項目（$var）：しきい値を超えると、その項目だけが、WARN になって、失敗する"
+  else
+    ng "兆候の項目（$var）が、想定どおりに検出されない（終了コード $code、WARN $(grep -c '^WARN' <<<"$out") 件）"; echo "$out" | grep -E "^(WARN|ERROR)" | head -3
+  fi
+done
+
 [ "$failed" = 0 ] && echo "監視スクリプトの確認：すべて想定どおり" || { echo "監視スクリプトの確認：想定外があります"; exit 1; }
