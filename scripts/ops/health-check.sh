@@ -16,6 +16,12 @@ USERS_WARN="${USERS_WARN:-40000}"                  # 月間アクティブ5万�
 REPORT_OVERDUE_DAYS="${REPORT_OVERDUE_DAYS:-3}"    # 未対応の通報が、この日数を超えたら警告
 STORAGE_PENDING_WARN="${STORAGE_PENDING_WARN:-1}"  # 削除待ちで、5回以上失敗した画像の件数
 PUSH_FAILED_WARN="${PUSH_FAILED_WARN:-20}"         # 24時間のプッシュ配信の失敗数
+# 侵入・荒らしの兆候（初期値は控えめ。利用者が増えたら、いつもの数に合わせて調整する）
+SIGNUPS_24H_WARN="${SIGNUPS_24H_WARN:-50}"         # 24時間の新規登録数（ボットによる大量の登録）
+NEW_ADMINS_24H_WARN="${NEW_ADMINS_24H_WARN:-1}"    # 24時間に追加された運営者（運営の権限を足された）
+SETTING_CHANGES_24H_WARN="${SETTING_CHANGES_24H_WARN:-1}"  # 24時間の運営設定の変更（新規登録の停止などの書き換え）
+MODERATION_24H_WARN="${MODERATION_24H_WARN:-20}"   # 24時間の運営の対処の数（運営アカウントの乗っ取りによる大量の削除）
+DELETIONS_24H_WARN="${DELETIONS_24H_WARN:-100}"    # 24時間の削除の数（台帳。大量削除）
 
 warn=0
 failed_query=0
@@ -35,6 +41,23 @@ check() { # check <ラベル> <値> <しきい値> <説明>
 }
 # 失敗したときは、何も出力せず（空）、理由は標準エラーへ。呼び出し側（check）が、数でない値を失敗として扱う。
 q() { db_psql SRC -c "$1" || true; }
+
+# 最初に、読んでいるロールが、行ごとの権限（RLS）を回避できるか確かめる。
+# 回避できないと、運営専用・内部専用の表（通報・運営の対処・削除待ち・配信・台帳など）が、いつも「0件」に見えて、
+# 異常があっても「正常」と出てしまう（監視が盲目になる）。読み取り専用ロールには、BYPASSRLS が要る（運用手順 4.3）。
+rls_ok="$(q "select (rolbypassrls or rolsuper) from pg_roles where rolname = current_user")"
+case "$rls_ok" in
+  t) ;;
+  f)
+    echo "ERROR - このDBロールは、行ごとの権限（RLS）を回避できません。運営専用・内部専用の表が、0件に見えて、監視が正しく動きません" >&2
+    echo "        → 読み取り専用ロールに BYPASSRLS を付ける（運用手順 4.3、scripts/ops/backup-reader-role.sql）" >&2
+    failed_query=1
+    ;;
+  *)
+    echo "ERROR - DBロールの権限を確認できませんでした（DBへの接続・権限の失敗の可能性）" >&2
+    failed_query=1
+    ;;
+esac
 
 check "DBの容量（MB）" "$(q "select (pg_database_size(current_database()) / 1024 / 1024)::int")" "$DB_SIZE_WARN_MB" \
   "→ 無料枠の上限に近い。古いデータの整理か、プランの見直しを検討"
@@ -58,6 +81,23 @@ check "配信されないまま溜まったプッシュ（1時間以上）" \
 check "保持期限（35日）を過ぎても残っている台帳の行" \
   "$(q "select count(*) from public.deletion_ledger where deleted_at < now() - interval '35 days'")" 1 \
   "→ 保持期限を過ぎた台帳が残っている（毎日の掃除が止まっている可能性）"
+
+# --- 侵入・荒らしの兆候（意図したものでない変化に、気づくため）---
+check "24時間の新規登録数（ボットの兆候）" \
+  "$(q "select count(*) from auth.users where created_at > now() - interval '24 hours'")" "$SIGNUPS_24H_WARN" \
+  "→ いつもより多い。ボットの可能性。Authentication > Attack Protection（CAPTCHA）と、新規登録の停止（運営設定）を検討"
+check "24時間に追加された運営者（運営の権限）" \
+  "$(q "select count(*) from public.admin_users where created_at > now() - interval '24 hours'")" "$NEW_ADMINS_24H_WARN" \
+  "→ 運営者が増えた。意図した追加でなければ、侵入の可能性。すぐ確認（運用手順の事故対応）"
+check "24時間の運営設定の変更" \
+  "$(q "select count(*) from public.app_settings_history where changed_at > now() - interval '24 hours'")" "$SETTING_CHANGES_24H_WARN" \
+  "→ 新規登録の停止・投稿の制限などが書き換えられた。意図した変更か確認（誰が変えたかは、app_settings_history）"
+check "24時間の運営の対処の数（削除・警告・利用停止）" \
+  "$(q "select count(*) from public.moderation_actions where created_at > now() - interval '24 hours'")" "$MODERATION_24H_WARN" \
+  "→ いつもより多い。運営アカウントの乗っ取りによる、大量の対処の可能性（誰がしたかは、moderation_actions）"
+check "24時間の削除の数（台帳）" \
+  "$(q "select count(*) from public.deletion_ledger where deleted_at > now() - interval '24 hours'")" "$DELETIONS_24H_WARN" \
+  "→ 大量の削除（退会・投稿・コメント）。意図しないものでないか確認"
 
 # 毎日の掃除（pg_cron）が動いているか：最近の実行の失敗数。cronスキーマを読めない権限では飛ばす。
 has_cron="$(q "select to_regclass('cron.job_run_details') is not null")"
